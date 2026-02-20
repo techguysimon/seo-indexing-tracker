@@ -29,6 +29,7 @@ from seo_indexing_tracker.services.config_validation import (
     ConfigurationValidationService,
 )
 from seo_indexing_tracker.services.priority_queue import PriorityQueueService
+from seo_indexing_tracker.services.sitemap_fetcher import SitemapFetchHTTPError
 from seo_indexing_tracker.services.url_discovery import URLDiscoveryService
 
 router = APIRouter(tags=["web"])
@@ -883,9 +884,24 @@ async def trigger_indexing(
     )
 
     discovered_urls = 0
-    for sitemap_id in sitemap_ids:
-        discovery_result = await discovery_service.discover_urls(sitemap_id)
-        discovered_urls += discovery_result.new_count + discovery_result.modified_count
+    try:
+        for sitemap_id in sitemap_ids:
+            discovery_result = await discovery_service.discover_urls(sitemap_id)
+            discovered_urls += (
+                discovery_result.new_count + discovery_result.modified_count
+            )
+    except SitemapFetchHTTPError as error:
+        feedback = (
+            "Trigger indexing failed: "
+            f"unable to fetch sitemap ({error.url}, HTTP {error.status_code}). "
+            "Verify sitemap access rules and retry."
+        )
+        return await _render_website_detail(
+            request=request,
+            session=session,
+            website_id=website_id,
+            feedback=feedback,
+        )
 
     website_url_ids = list(
         await session.scalars(select(URL.id).where(URL.website_id == website_id))
