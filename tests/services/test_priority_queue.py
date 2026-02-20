@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from seo_indexing_tracker.models import Base, URL, Website
+from seo_indexing_tracker.models import Base, IndexStatus, IndexVerdict, URL, Website
 from seo_indexing_tracker.services.priority_queue import (
     PriorityQueueService,
     calculate_url_priority,
@@ -80,7 +80,7 @@ async def test_priority_queue_enqueue_dequeue_and_remove(tmp_path: Path) -> None
             URL(
                 website_id=website.id,
                 url="https://example.com/c",
-                sitemap_priority=0.7,
+                sitemap_priority=0.2,
                 lastmod=now - timedelta(days=2),
             ),
             URL(
@@ -94,6 +94,24 @@ async def test_priority_queue_enqueue_dequeue_and_remove(tmp_path: Path) -> None
         session.add_all(queued_urls)
         await session.flush()
 
+        session.add_all(
+            [
+                IndexStatus(
+                    url_id=queued_urls[1].id,
+                    coverage_state="Indexed",
+                    verdict=IndexVerdict.PASS,
+                    raw_response={"source": "test"},
+                ),
+                IndexStatus(
+                    url_id=queued_urls[2].id,
+                    coverage_state="Crawled - currently not indexed",
+                    verdict=IndexVerdict.FAIL,
+                    raw_response={"source": "test"},
+                ),
+            ]
+        )
+        await session.flush()
+
         website_id = website.id
         url_ids = [url.id for url in queued_urls]
 
@@ -105,14 +123,14 @@ async def test_priority_queue_enqueue_dequeue_and_remove(tmp_path: Path) -> None
     top_urls = await service.peek(website_id, limit=3)
     assert [url.url for url in top_urls] == [
         "https://example.com/d",
-        "https://example.com/b",
+        "https://example.com/a",
         "https://example.com/c",
     ]
 
     dequeued = await service.dequeue(website_id, limit=2)
     assert [url.url for url in dequeued] == [
         "https://example.com/d",
-        "https://example.com/b",
+        "https://example.com/a",
     ]
 
     async with scoped_session() as session:
@@ -126,8 +144,9 @@ async def test_priority_queue_enqueue_dequeue_and_remove(tmp_path: Path) -> None
         }
 
     assert persisted_urls["https://example.com/d"].current_priority == 0.0
-    assert persisted_urls["https://example.com/b"].current_priority == 0.0
+    assert persisted_urls["https://example.com/a"].current_priority == 0.0
     assert persisted_urls["https://example.com/c"].current_priority > 0.0
+    assert persisted_urls["https://example.com/b"].current_priority > 0.0
 
     await service.remove(url_ids[2])
 

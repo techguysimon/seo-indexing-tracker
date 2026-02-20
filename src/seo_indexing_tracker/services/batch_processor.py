@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import insert
+from sqlalchemy import and_, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seo_indexing_tracker.models import (
@@ -74,6 +74,7 @@ class URLBatchOutcome:
     url_id: UUID
     url: str
     submission_success: bool
+    submission_skipped: bool
     submission_error_code: str | None
     submission_error_message: str | None
     inspection_attempted: bool
@@ -240,8 +241,44 @@ class BatchProcessorService:
 
         submitted_results: dict[UUID, IndexingURLResult] = {}
         submission_logs: list[_SubmissionLogRecord] = []
+        latest_statuses = await self._latest_index_statuses_by_url_ids(
+            url_ids=ordered_url_ids
+        )
+        eligible_for_submission: list[URL] = []
 
-        for url_batch in self._chunk_urls(queued_urls, self._submit_batch_size):
+        for queued_url in queued_urls:
+            latest_status = latest_statuses.get(queued_url.id)
+            if queued_url.manual_priority_override is None and self._is_already_indexed(
+                latest_status
+            ):
+                outcomes[queued_url.id] = self._with_submission_skipped(
+                    outcomes[queued_url.id],
+                    error_code="SKIPPED_ALREADY_INDEXED",
+                    error_message="Skipped submission because latest status is Indexed",
+                )
+                submission_logs.append(
+                    _SubmissionLogRecord(
+                        url_id=queued_url.id,
+                        api_response={
+                            "url": queued_url.url,
+                            "action": action.value,
+                            "success": False,
+                            "error_code": "SKIPPED_ALREADY_INDEXED",
+                            "error_message": (
+                                "Skipped submission because latest status is Indexed"
+                            ),
+                        },
+                        status=SubmissionStatus.SKIPPED,
+                        error_message="Skipped submission because latest status is Indexed",
+                    )
+                )
+                continue
+
+            eligible_for_submission.append(queued_url)
+
+        for url_batch in self._chunk_urls(
+            eligible_for_submission, self._submit_batch_size
+        ):
             batch_results, batch_logs = await self._submit_url_batch(
                 website_id=website_id,
                 urls=url_batch,
@@ -262,17 +299,22 @@ class BatchProcessorService:
                 stage="submit",
                 message="Submitted URL batch to Google Indexing API",
                 total_urls=len(queued_urls),
-                processed_urls=len(submitted_results),
+                processed_urls=(
+                    len(submitted_results)
+                    + self._submission_skipped_count(list(outcomes.values()))
+                ),
                 successful_urls=self._submission_success_count(list(outcomes.values())),
-                failed_urls=len(submitted_results)
-                - self._submission_success_count(list(outcomes.values())),
+                failed_urls=(
+                    len(submitted_results)
+                    - self._submission_success_count(list(outcomes.values()))
+                ),
             )
 
         await self._record_submission_logs(action=action, logs=submission_logs)
 
         successfully_submitted = [
             queued_url
-            for queued_url in queued_urls
+            for queued_url in eligible_for_submission
             if submitted_results.get(queued_url.id, None) is not None
             and submitted_results[queued_url.id].success
         ]
@@ -318,6 +360,7 @@ class BatchProcessorService:
             outcome.url_id
             for outcome in outcomes.values()
             if (not outcome.submission_success)
+            and (not outcome.submission_skipped)
             or (outcome.inspection_attempted and not outcome.inspection_success)
         ]
         requeued_count = await self._priority_queue.enqueue_many(failed_url_ids)
@@ -621,6 +664,7 @@ class BatchProcessorService:
                 url_id=queued_url.id,
                 url=queued_url.url,
                 submission_success=False,
+                submission_skipped=False,
                 submission_error_code=None,
                 submission_error_message=None,
                 inspection_attempted=False,
@@ -682,6 +726,7 @@ class BatchProcessorService:
             url_id=outcome.url_id,
             url=outcome.url,
             submission_success=result.success,
+            submission_skipped=False,
             submission_error_code=result.error_code,
             submission_error_message=result.error_message,
             inspection_attempted=outcome.inspection_attempted,
@@ -701,6 +746,7 @@ class BatchProcessorService:
             url_id=outcome.url_id,
             url=outcome.url,
             submission_success=False,
+            submission_skipped=False,
             submission_error_code=error_code,
             submission_error_message=error_message,
             inspection_attempted=False,
@@ -718,12 +764,33 @@ class BatchProcessorService:
             url_id=outcome.url_id,
             url=outcome.url,
             submission_success=outcome.submission_success,
+            submission_skipped=outcome.submission_skipped,
             submission_error_code=outcome.submission_error_code,
             submission_error_message=outcome.submission_error_message,
             inspection_attempted=True,
             inspection_success=result.success,
             inspection_error_code=result.error_code,
             inspection_error_message=result.error_message,
+        )
+
+    @staticmethod
+    def _with_submission_skipped(
+        outcome: URLBatchOutcome,
+        *,
+        error_code: str,
+        error_message: str,
+    ) -> URLBatchOutcome:
+        return URLBatchOutcome(
+            url_id=outcome.url_id,
+            url=outcome.url,
+            submission_success=False,
+            submission_skipped=True,
+            submission_error_code=error_code,
+            submission_error_message=error_message,
+            inspection_attempted=False,
+            inspection_success=False,
+            inspection_error_code=None,
+            inspection_error_message=None,
         )
 
     @staticmethod
@@ -737,6 +804,10 @@ class BatchProcessorService:
     @staticmethod
     def _submission_success_count(outcomes: Sequence[URLBatchOutcome]) -> int:
         return sum(1 for outcome in outcomes if outcome.submission_success)
+
+    @staticmethod
+    def _submission_skipped_count(outcomes: Sequence[URLBatchOutcome]) -> int:
+        return sum(1 for outcome in outcomes if outcome.submission_skipped)
 
     @staticmethod
     def _inspection_success_count(outcomes: Sequence[URLBatchOutcome]) -> int:
@@ -791,9 +862,12 @@ class BatchProcessorService:
         successful = [
             outcome
             for outcome in outcomes
-            if outcome.submission_success
-            and outcome.inspection_attempted
-            and outcome.inspection_success
+            if outcome.submission_skipped
+            or (
+                outcome.submission_success
+                and outcome.inspection_attempted
+                and outcome.inspection_success
+            )
         ]
         if len(successful) == len(outcomes):
             return BatchProcessorStatus.COMPLETED
@@ -807,6 +881,47 @@ class BatchProcessorService:
             list(urls[index : index + chunk_size])
             for index in range(0, len(urls), chunk_size)
         ]
+
+    async def _latest_index_statuses_by_url_ids(
+        self,
+        *,
+        url_ids: Sequence[UUID],
+    ) -> dict[UUID, IndexStatus]:
+        if not url_ids:
+            return {}
+
+        latest_checked_subquery = (
+            select(
+                IndexStatus.url_id.label("url_id"),
+                func.max(IndexStatus.checked_at).label("checked_at"),
+            )
+            .where(IndexStatus.url_id.in_(url_ids))
+            .group_by(IndexStatus.url_id)
+            .subquery()
+        )
+
+        async with self._session_factory() as session:
+            statuses_result = await session.execute(
+                select(IndexStatus)
+                .join(
+                    latest_checked_subquery,
+                    and_(
+                        IndexStatus.url_id == latest_checked_subquery.c.url_id,
+                        IndexStatus.checked_at == latest_checked_subquery.c.checked_at,
+                    ),
+                )
+                .where(IndexStatus.url_id.in_(url_ids))
+            )
+            latest_statuses = statuses_result.scalars().all()
+
+        return {status.url_id: status for status in latest_statuses}
+
+    @staticmethod
+    def _is_already_indexed(index_status: IndexStatus | None) -> bool:
+        if index_status is None:
+            return False
+
+        return index_status.coverage_state.strip().casefold() == "indexed"
 
     async def _emit_progress(
         self,

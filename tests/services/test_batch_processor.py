@@ -16,8 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from seo_indexing_tracker.models import (
     Base,
     IndexStatus,
+    IndexVerdict,
     SubmissionAction,
     SubmissionLog,
+    SubmissionStatus,
     URL,
     Website,
 )
@@ -163,6 +165,156 @@ class _FailingClientFactory:
     def get_client(self, website_id: UUID | str) -> _FakeClientBundle:
         del website_id
         raise RuntimeError("missing service account config")
+
+
+@pytest.mark.asyncio
+async def test_batch_processor_skips_already_indexed_urls_without_manual_override(
+    tmp_path: Path,
+) -> None:
+    database_url = (
+        f"sqlite+aiosqlite:///{tmp_path / 'batch-processor-skip-indexed.sqlite'}"
+    )
+    engine = create_async_engine(database_url)
+    session_factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    @asynccontextmanager
+    async def scoped_session() -> AsyncIterator[AsyncSession]:
+        session = session_factory()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with scoped_session() as session:
+        website = Website(domain="example.net", site_url="https://example.net/")
+        session.add(website)
+        await session.flush()
+
+        indexed_url = URL(
+            website_id=website.id,
+            url="https://example.net/indexed",
+            sitemap_priority=0.8,
+            lastmod=datetime.now(UTC),
+        )
+        not_indexed_url = URL(
+            website_id=website.id,
+            url="https://example.net/not-indexed",
+            sitemap_priority=0.7,
+            lastmod=datetime.now(UTC),
+        )
+        force_resubmit_url = URL(
+            website_id=website.id,
+            url="https://example.net/force-resubmit",
+            sitemap_priority=0.6,
+            lastmod=datetime.now(UTC),
+            manual_priority_override=1.0,
+        )
+        session.add_all([indexed_url, not_indexed_url, force_resubmit_url])
+        await session.flush()
+
+        session.add_all(
+            [
+                IndexStatus(
+                    url_id=indexed_url.id,
+                    coverage_state="Indexed",
+                    verdict=IndexVerdict.PASS,
+                    raw_response={"source": "test"},
+                ),
+                IndexStatus(
+                    url_id=force_resubmit_url.id,
+                    coverage_state="Indexed",
+                    verdict=IndexVerdict.PASS,
+                    raw_response={"source": "test"},
+                ),
+            ]
+        )
+        await session.flush()
+
+        website_id = website.id
+        url_ids = [indexed_url.id, not_indexed_url.id, force_resubmit_url.id]
+
+    queue_service = PriorityQueueService(session_factory=scoped_session)
+    await queue_service.enqueue_many(url_ids)
+
+    class _TrackingIndexingClient(_FakeIndexingClient):
+        def __init__(self) -> None:
+            self.submitted_urls: list[str] = []
+
+        async def batch_submit(
+            self,
+            urls: list[str] | tuple[str, ...],
+            action: str = "URL_UPDATED",
+        ) -> BatchSubmitResult:
+            self.submitted_urls.extend(urls)
+            return await super().batch_submit(urls, action)
+
+    class _TrackingClientBundle:
+        def __init__(self) -> None:
+            self.indexing = _TrackingIndexingClient()
+            self.search_console = _FakeInspectionClient()
+
+    class _TrackingClientFactory:
+        def __init__(self) -> None:
+            self.bundle = _TrackingClientBundle()
+
+        def get_client(self, website_id: UUID | str) -> _TrackingClientBundle:
+            del website_id
+            return self.bundle
+
+    tracking_factory = _TrackingClientFactory()
+    processor = BatchProcessorService(
+        priority_queue=queue_service,
+        client_factory=cast(Any, tracking_factory),
+        rate_limiter=cast(Any, _FakeRateLimiter()),
+        session_factory=scoped_session,
+        dequeue_batch_size=3,
+        submit_batch_size=3,
+        inspection_batch_size=3,
+    )
+
+    result = await processor.process_batch(website_id, requested_urls=3)
+
+    assert result.status == BatchProcessorStatus.COMPLETED
+    assert result.dequeued_urls == 3
+    assert result.submitted_urls == 2
+    assert result.submission_success_count == 2
+    assert result.submission_failure_count == 0
+    assert result.requeued_urls == 0
+
+    submitted_urls = tracking_factory.bundle.indexing.submitted_urls
+    assert "https://example.net/indexed" not in submitted_urls
+    assert "https://example.net/not-indexed" in submitted_urls
+    assert "https://example.net/force-resubmit" in submitted_urls
+
+    async with scoped_session() as session:
+        submission_logs = (
+            (
+                await session.execute(
+                    select(SubmissionLog).order_by(SubmissionLog.submitted_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert len(submission_logs) == 3
+    assert (
+        sum(1 for log in submission_logs if log.status == SubmissionStatus.SKIPPED) == 1
+    )
+
+    await engine.dispose()
 
 
 @pytest.mark.asyncio

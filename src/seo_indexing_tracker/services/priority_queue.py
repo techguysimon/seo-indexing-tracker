@@ -8,15 +8,19 @@ from datetime import UTC, datetime
 from typing import Any, TypeGuard, cast
 from uuid import UUID
 
-from sqlalchemy import bindparam, select, update
+from sqlalchemy import and_, bindparam, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from seo_indexing_tracker.models.index_status import IndexStatus
 from seo_indexing_tracker.models.url import DEFAULT_URL_PRIORITY, URL
 
 DEFAULT_BATCH_SIZE = 500
 FRESHNESS_WINDOW_DAYS = 30
 SITEMAP_WEIGHT = 0.7
-FRESHNESS_WEIGHT = 0.3
+FRESHNESS_WEIGHT = 0.2
+NEVER_CHECKED_BONUS = 0.5
+NOT_INDEXED_BONUS = 0.25
+INDEXED_BONUS = -0.5
 
 SessionScopeFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
@@ -60,6 +64,7 @@ def calculate_url_priority(
     lastmod: datetime | None,
     sitemap_priority: float | None,
     manual_override: float | None,
+    index_status: IndexStatus | None = None,
     now: datetime | None = None,
 ) -> float:
     """Calculate URL queue priority using manual override, sitemap data, and freshness."""
@@ -73,9 +78,17 @@ def calculate_url_priority(
         if sitemap_priority is None
         else _clamp_priority(float(sitemap_priority))
     )
+
+    if index_status is None:
+        index_status_bonus = NEVER_CHECKED_BONUS
+    elif index_status.coverage_state.strip().casefold() == "indexed":
+        index_status_bonus = INDEXED_BONUS
+    else:
+        index_status_bonus = NOT_INDEXED_BONUS
+
     freshness_score = _freshness_score(lastmod=lastmod, now=normalized_now)
-    weighted_priority = (base_priority * SITEMAP_WEIGHT) + (
-        freshness_score * FRESHNESS_WEIGHT
+    weighted_priority = (
+        base_priority + index_status_bonus + (freshness_score * FRESHNESS_WEIGHT)
     )
     return round(_clamp_priority(weighted_priority), 6)
 
@@ -108,10 +121,16 @@ class PriorityQueueService:
             if url is None:
                 raise ValueError(f"URL {url_id} does not exist")
 
+            status_by_url_id = await self._latest_index_statuses_by_url_id(
+                session=session,
+                url_ids=[url.id],
+            )
+
             url.current_priority = calculate_url_priority(
                 lastmod=url.lastmod,
                 sitemap_priority=url.sitemap_priority,
                 manual_override=url.manual_priority_override,
+                index_status=status_by_url_id.get(url.id),
             )
             return url
 
@@ -134,6 +153,11 @@ class PriorityQueueService:
                 )
                 raise ValueError(f"Cannot enqueue missing URL ids: {missing_ids_text}")
 
+            status_by_url_id = await self._latest_index_statuses_by_url_id(
+                session=session,
+                url_ids=[url.id for url in urls],
+            )
+
             updates = [
                 {
                     "b_id": url.id,
@@ -141,6 +165,7 @@ class PriorityQueueService:
                         lastmod=url.lastmod,
                         sitemap_priority=url.sitemap_priority,
                         manual_override=url.manual_priority_override,
+                        index_status=status_by_url_id.get(url.id),
                     ),
                 }
                 for url in urls
@@ -227,12 +252,51 @@ class PriorityQueueService:
                     manual_override_value = _clamp_priority(float(manual_override))
                     url.manual_priority_override = manual_override_value
 
+            status_by_url_id = await self._latest_index_statuses_by_url_id(
+                session=session,
+                url_ids=[url.id],
+            )
+
             url.current_priority = calculate_url_priority(
                 lastmod=url.lastmod,
                 sitemap_priority=url.sitemap_priority,
                 manual_override=url.manual_priority_override,
+                index_status=status_by_url_id.get(url.id),
             )
             return url
+
+    async def _latest_index_statuses_by_url_id(
+        self,
+        *,
+        session: AsyncSession,
+        url_ids: Sequence[UUID],
+    ) -> dict[UUID, IndexStatus]:
+        if not url_ids:
+            return {}
+
+        latest_checked_subquery = (
+            select(
+                IndexStatus.url_id.label("url_id"),
+                func.max(IndexStatus.checked_at).label("checked_at"),
+            )
+            .where(IndexStatus.url_id.in_(url_ids))
+            .group_by(IndexStatus.url_id)
+            .subquery()
+        )
+
+        latest_status_result = await session.execute(
+            select(IndexStatus)
+            .join(
+                latest_checked_subquery,
+                and_(
+                    IndexStatus.url_id == latest_checked_subquery.c.url_id,
+                    IndexStatus.checked_at == latest_checked_subquery.c.checked_at,
+                ),
+            )
+            .where(IndexStatus.url_id.in_(url_ids))
+        )
+        statuses = latest_status_result.scalars().all()
+        return {status.url_id: status for status in statuses}
 
     async def remove(self, url_id: UUID) -> URL:
         """Remove a URL from the active queue."""

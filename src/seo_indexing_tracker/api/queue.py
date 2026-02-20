@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from secrets import compare_digest
 from math import ceil
 from typing import Literal
@@ -16,8 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from seo_indexing_tracker.config import get_settings
 from seo_indexing_tracker.database import get_db_session
-from seo_indexing_tracker.models import URL, Website
+from seo_indexing_tracker.models import IndexStatus, URL, Website
 from seo_indexing_tracker.schemas import URLRead
+from seo_indexing_tracker.services.processing_pipeline import (
+    SchedulerProcessingPipelineService,
+)
 from seo_indexing_tracker.services import PriorityQueueService
 
 router = APIRouter(prefix="/api/queue", tags=["queue"])
@@ -108,12 +112,47 @@ class QueueManualTriggerResponse(BaseModel):
     affected_count: int
 
 
+class QueueInitialVerificationResponse(BaseModel):
+    """Initial verification trigger response metadata."""
+
+    website_id: UUID
+    total_urls: int
+    verified_urls: int
+    runs: int
+
+
+class QueueForceResubmitRequest(BaseModel):
+    """Manual force-resubmit payload."""
+
+    url_ids: list[UUID] = Field(min_length=1, max_length=500)
+
+
+class QueueForceResubmitResponse(BaseModel):
+    """Manual force-resubmit response metadata."""
+
+    website_id: UUID
+    affected_count: int
+
+
 def _get_queue_admin_token() -> str:
     return get_settings().SECRET_KEY.get_secret_value()
 
 
 def _get_priority_queue_service() -> PriorityQueueService:
     return PriorityQueueService()
+
+
+def _get_processing_pipeline_service(
+    request: Request,
+) -> SchedulerProcessingPipelineService:
+    pipeline_service = getattr(request.app.state, "processing_pipeline_service", None)
+    if isinstance(pipeline_service, SchedulerProcessingPipelineService):
+        return pipeline_service
+
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Processing pipeline service is unavailable",
+    )
 
 
 async def _require_queue_admin(
@@ -190,6 +229,21 @@ async def _ensure_website_exists(*, website_id: UUID, session: AsyncSession) -> 
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Website not found",
     )
+
+
+async def _count_verified_urls_since(
+    *,
+    website_id: UUID,
+    checked_after: datetime,
+    session: AsyncSession,
+) -> int:
+    verified_count = await session.scalar(
+        select(func.count(func.distinct(IndexStatus.url_id)))
+        .select_from(IndexStatus)
+        .join(URL, URL.id == IndexStatus.url_id)
+        .where(URL.website_id == website_id, IndexStatus.checked_at >= checked_after)
+    )
+    return int(verified_count or 0)
 
 
 @router.post(
@@ -582,5 +636,131 @@ async def queue_manual_trigger(
     return QueueManualTriggerResponse(
         website_id=website_id,
         action=payload.action,
+        affected_count=affected_count,
+    )
+
+
+@router.post(
+    "/websites/{website_id}/initial-verification",
+    response_model=QueueInitialVerificationResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(_require_queue_admin)],
+)
+async def trigger_initial_verification(
+    website_id: UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    pipeline_service: SchedulerProcessingPipelineService = Depends(
+        _get_processing_pipeline_service
+    ),
+) -> QueueInitialVerificationResponse:
+    await _ensure_website_exists(website_id=website_id, session=session)
+
+    total_urls = int(
+        (
+            await session.scalar(
+                select(func.count())
+                .select_from(URL)
+                .where(URL.website_id == website_id)
+            )
+        )
+        or 0
+    )
+    if total_urls == 0:
+        return QueueInitialVerificationResponse(
+            website_id=website_id,
+            total_urls=0,
+            verified_urls=0,
+            runs=0,
+        )
+
+    started_at = datetime.now(UTC)
+    verification_batch_size = get_settings().SCHEDULER_INDEX_VERIFICATION_BATCH_SIZE
+    max_runs = max(1, ceil(total_urls / verification_batch_size) + 2)
+
+    verified_urls = 0
+    run_count = 0
+    while verified_urls < total_urls and run_count < max_runs:
+        await pipeline_service.run_index_verification_job()
+        run_count += 1
+
+        latest_verified_count = await _count_verified_urls_since(
+            website_id=website_id,
+            checked_after=started_at,
+            session=session,
+        )
+        if latest_verified_count == verified_urls:
+            break
+
+        verified_urls = latest_verified_count
+
+    if verified_urls < total_urls:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Initial verification did not complete all URLs. "
+                f"Verified {verified_urls} of {total_urls} URLs."
+            ),
+        )
+
+    _audit_manual_action(
+        request=request,
+        action="manual_trigger_initial_verification",
+        website_id=website_id,
+        cleared_count=verified_urls,
+    )
+    return QueueInitialVerificationResponse(
+        website_id=website_id,
+        total_urls=total_urls,
+        verified_urls=verified_urls,
+        runs=run_count,
+    )
+
+
+@router.post(
+    "/websites/{website_id}/force-resubmit",
+    response_model=QueueForceResubmitResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(_require_queue_admin)],
+)
+async def force_resubmit_urls(
+    website_id: UUID,
+    payload: QueueForceResubmitRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> QueueForceResubmitResponse:
+    await _ensure_website_exists(website_id=website_id, session=session)
+
+    existing_ids = set(
+        await session.scalars(
+            select(URL.id).where(
+                URL.website_id == website_id,
+                URL.id.in_(payload.url_ids),
+            )
+        )
+    )
+    missing_ids = [url_id for url_id in payload.url_ids if url_id not in existing_ids]
+    if missing_ids:
+        missing_ids_text = ", ".join(str(url_id) for url_id in missing_ids)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"URLs not found for website: {missing_ids_text}",
+        )
+
+    await session.execute(
+        update(URL)
+        .where(URL.website_id == website_id, URL.id.in_(payload.url_ids))
+        .values(manual_priority_override=1.0, current_priority=1.0)
+    )
+    affected_count = len(payload.url_ids)
+
+    _audit_manual_action(
+        request=request,
+        action="manual_trigger_force_resubmit",
+        website_id=website_id,
+        cleared_count=affected_count,
+    )
+    return QueueForceResubmitResponse(
+        website_id=website_id,
         affected_count=affected_count,
     )

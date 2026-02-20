@@ -92,8 +92,8 @@ async def _build_context(tmp_path: Path) -> QueueApiTestContext:
 
     app.dependency_overrides[get_db_session] = override_get_db_session
     app.dependency_overrides[_get_queue_admin_token] = lambda: "test-admin-token"
-    app.dependency_overrides[_get_priority_queue_service] = (
-        lambda: PriorityQueueService(session_factory=scoped_session)
+    app.dependency_overrides[_get_priority_queue_service] = lambda: (
+        PriorityQueueService(session_factory=scoped_session)
     )
 
     return QueueApiTestContext(
@@ -192,5 +192,34 @@ async def test_queue_endpoints_add_remove_update_and_clear(tmp_path: Path) -> No
             assert first_url.manual_priority_override is None
             assert second_url.current_priority == 0
             assert second_url.manual_priority_override is None
+    finally:
+        await context.engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_queue_endpoint_force_resubmit_sets_manual_override(
+    tmp_path: Path,
+) -> None:
+    context = await _build_context(tmp_path)
+
+    try:
+        transport = ASGITransport(app=context.app)
+        auth_headers = {"Authorization": "Bearer test-admin-token"}
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                f"/api/queue/websites/{context.website_id}/force-resubmit",
+                headers=auth_headers,
+                json={"url_ids": [str(context.first_url_id)]},
+            )
+            assert response.status_code == 200
+            assert response.json()["website_id"] == str(context.website_id)
+            assert response.json()["affected_count"] == 1
+
+        async with context.session_scope() as session:
+            first_url = await session.get(URL, context.first_url_id)
+            assert first_url is not None
+            assert first_url.manual_priority_override == 1.0
+            assert first_url.current_priority == 1.0
     finally:
         await context.engine.dispose()

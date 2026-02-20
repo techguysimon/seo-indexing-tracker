@@ -38,6 +38,7 @@ class SubmissionStatus(str, Enum):
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
     RATE_LIMITED = "RATE_LIMITED"
+    SKIPPED = "SKIPPED"
 
 
 class SubmissionLog(Base):
