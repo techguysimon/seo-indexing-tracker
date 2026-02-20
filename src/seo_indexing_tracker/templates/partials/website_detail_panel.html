@@ -22,6 +22,22 @@
       <strong>{{ service_account.name }}</strong>
       <span>{{ service_account.credentials_path }}</span>
       <span>Scopes: {{ service_account.scopes | join(", ") }}</span>
+      <form
+        class="inline-form"
+        action="/ui/websites/{{ website.id }}/service-account/delete"
+        method="post"
+        hx-post="/ui/websites/{{ website.id }}/service-account/delete"
+        hx-target="#website-detail-region"
+        hx-swap="innerHTML"
+      >
+        <button
+          type="submit"
+          class="panel-button panel-button-danger panel-button-small"
+          onclick="return confirm('Delete this service account?')"
+        >
+          Delete service account
+        </button>
+      </form>
     </li>
   </ul>
   {% else %}
@@ -93,6 +109,22 @@
       <span class="pill {% if sitemap.is_active %}pill-ok{% else %}pill-dim{% endif %}">
         {% if sitemap.is_active %}Active{% else %}Inactive{% endif %}
       </span>
+      <form
+        class="inline-form"
+        action="/ui/sitemaps/{{ sitemap.id }}/delete"
+        method="post"
+        hx-post="/ui/sitemaps/{{ sitemap.id }}/delete"
+        hx-target="#website-detail-region"
+        hx-swap="innerHTML"
+      >
+        <button
+          type="submit"
+          class="panel-button panel-button-danger panel-button-small"
+          onclick="return confirm('Delete this sitemap?')"
+        >
+          Delete sitemap
+        </button>
+      </form>
     </li>
     {% else %}
     <li>No sitemaps configured yet.</li>

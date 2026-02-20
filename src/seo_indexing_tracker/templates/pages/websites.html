@@ -33,6 +33,20 @@
       <span class="pill {% if website.is_active %}pill-ok{% else %}pill-dim{% endif %}">
         {% if website.is_active %}Active{% else %}Inactive{% endif %}
       </span>
+      <form
+        class="inline-form"
+        hx-delete="/api/websites/{{ website.id }}?hard_delete=true"
+        hx-target="closest li"
+        hx-swap="delete"
+      >
+        <button
+          type="submit"
+          class="panel-button panel-button-danger panel-button-small"
+          onclick="return confirm('Delete this website?')"
+        >
+          Delete website
+        </button>
+      </form>
     </li>
     {% else %}
     <li>No websites configured yet.</li>

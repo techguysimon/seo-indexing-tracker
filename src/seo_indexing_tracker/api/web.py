@@ -746,6 +746,40 @@ async def create_service_account_from_web(
     )
 
 
+@router.post("/websites/{website_id}/service-account/delete", response_class=Response)
+@router.post(
+    "/ui/websites/{website_id}/service-account/delete", response_class=Response
+)
+async def delete_service_account_from_web(
+    request: Request,
+    website_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    """Delete service account for a website via web UI."""
+    website = await session.get(Website, website_id)
+    if website is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Website not found",
+        )
+
+    service_account = await session.scalar(
+        select(ServiceAccount).where(ServiceAccount.website_id == website_id)
+    )
+    feedback = "Service account not found"
+    if service_account is not None:
+        await session.delete(service_account)
+        await session.flush()
+        feedback = "Service account deleted"
+
+    return await _render_website_detail(
+        request=request,
+        session=session,
+        website_id=website_id,
+        feedback=feedback,
+    )
+
+
 @router.post("/websites/{website_id}/sitemaps", response_class=Response)
 @router.post("/ui/websites/{website_id}/sitemaps", response_class=Response)
 async def create_sitemap_for_website_from_web(
@@ -789,6 +823,32 @@ async def create_sitemap_for_website_from_web(
         session=session,
         website_id=website_id,
         feedback=feedback,
+    )
+
+
+@router.post("/sitemaps/{sitemap_id}/delete", response_class=Response)
+@router.post("/ui/sitemaps/{sitemap_id}/delete", response_class=Response)
+async def delete_sitemap_from_web(
+    request: Request,
+    sitemap_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    """Delete sitemap via website detail page."""
+    sitemap = await session.get(Sitemap, sitemap_id)
+    if sitemap is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Sitemap not found",
+        )
+
+    website_id = sitemap.website_id
+    await session.delete(sitemap)
+    await session.flush()
+    return await _render_website_detail(
+        request=request,
+        session=session,
+        website_id=website_id,
+        feedback="Sitemap deleted",
     )
 
 
