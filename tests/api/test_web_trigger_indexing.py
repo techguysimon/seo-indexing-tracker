@@ -114,6 +114,7 @@ async def test_trigger_indexing_returns_friendly_response_for_sitemap_fetch_erro
             assert "example.com/sitemap.xml" in full_page_response.text
             assert "user:password@" not in full_page_response.text
             assert "token=super-secret" not in full_page_response.text
+            assert "#section" not in full_page_response.text
             assert "hero-panel" in full_page_response.text
     finally:
         await engine.dispose()
