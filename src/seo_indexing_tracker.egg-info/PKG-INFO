@@ -1,0 +1,96 @@
+Metadata-Version: 2.4
+Name: seo-indexing-tracker
+Version: 0.1.0
+Summary: SEO indexing tracker service for monitoring indexing coverage.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn>=0.32.0
+Requires-Dist: sqlalchemy>=2.0.0
+Requires-Dist: aiosqlite>=0.20.0
+Requires-Dist: httpx>=0.28.0
+Requires-Dist: lxml>=5.3.0
+Requires-Dist: google-api-python-client>=2.149.0
+Requires-Dist: google-auth>=2.35.0
+Requires-Dist: apscheduler>=3.10.4
+Requires-Dist: jinja2>=3.1.4
+Requires-Dist: python-dotenv>=1.0.1
+Requires-Dist: pydantic>=2.9.2
+Requires-Dist: pydantic-settings>=2.6.1
+Provides-Extra: prod
+Provides-Extra: dev
+Requires-Dist: pytest>=8.3.3; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.24.0; extra == "dev"
+Requires-Dist: pytest-cov>=5.0.0; extra == "dev"
+Requires-Dist: pre-commit>=4.0.1; extra == "dev"
+Requires-Dist: ruff>=0.7.0; extra == "dev"
+Requires-Dist: mypy>=1.12.0; extra == "dev"
+Requires-Dist: black>=24.10.0; extra == "dev"
+
+# SEO Indexing Tracker
+
+SEO Indexing Tracker is a FastAPI-based service for monitoring website sitemap coverage
+and tracking indexing-related workflows.
+
+## Project Layout
+
+The core package lives in `src/seo_indexing_tracker/` with the following structure:
+
+- `api/`: API routing modules
+- `models/`: SQLAlchemy ORM models
+- `services/`: application service layer
+- `schemas/`: Pydantic schemas for request and response payloads
+- `utils/`: shared utility helpers
+- `templates/`: server-side template assets
+- `static/`: static frontend assets
+- `main.py`: FastAPI app factory and runtime entry point
+
+## Setup
+
+### Using uv (recommended - faster, modern package manager)
+
+```bash
+# Install uv if you don't have it
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies and run in one command
+uv run pip install -e .
+
+# Or install with dev dependencies
+uv sync --extra dev
+```
+
+### Or using venv + pip
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+```
+
+## Development
+
+### Run the API
+
+```bash
+uv run uvicorn seo_indexing_tracker.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Health check endpoint:
+
+```text
+GET /health
+```
+
+### Run tests
+
+```bash
+uv run pytest
+```
+
+### Run linters
+
+```bash
+uv run ruff check .
+uv run mypy src tests
+```

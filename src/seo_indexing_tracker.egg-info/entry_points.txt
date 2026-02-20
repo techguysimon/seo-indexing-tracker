@@ -1,0 +1,5 @@
+[console_scripts]
+format = seo_indexing_tracker.tooling:format
+lint = seo_indexing_tracker.tooling:lint
+seo-indexing-tracker = seo_indexing_tracker.main:main
+typecheck = seo_indexing_tracker.tooling:typecheck

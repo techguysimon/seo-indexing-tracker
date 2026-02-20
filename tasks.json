@@ -1,0 +1,2712 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SEO Indexing Tracker - Project Backlog",
+  "version": "1.0.0",
+  "project": {
+    "name": "SEO Indexing Tracker",
+    "description": "Multi-website URL indexing management system with Google API integration, priority queue, and web dashboard",
+    "repository": "seo-indexing-tracker",
+    "tech_stack": {
+      "backend": "Python 3.11+ / FastAPI",
+      "database": "SQLite (WAL mode)",
+      "frontend": "HTMX + Jinja2 templates",
+      "scheduling": "APScheduler (AsyncIOScheduler)",
+      "api_clients": [
+        "google-api-python-client",
+        "google-auth"
+      ],
+      "sitemap_parsing": "lxml with iterparse",
+      "deployment": "Docker Compose"
+    },
+    "created_at": "2026-02-20T00:00:00Z",
+    "updated_at": "2026-02-20T00:00:00Z"
+  },
+  "phases": [
+    {
+      "id": "phase-1-foundation",
+      "name": "Foundation",
+      "description": "Project setup, infrastructure, database, and core data models",
+      "status": "TODO",
+      "order": 1,
+      "epic_ids": [
+        "EPIC-001",
+        "EPIC-002"
+      ]
+    },
+    {
+      "id": "phase-2-core-features",
+      "name": "Core Features",
+      "description": "Website configuration management, sitemap parsing, and URL discovery",
+      "status": "TODO",
+      "order": 2,
+      "epic_ids": [
+        "EPIC-003",
+        "EPIC-004"
+      ]
+    },
+    {
+      "id": "phase-3-api-integration",
+      "name": "API Integration",
+      "description": "Google API clients for Indexing API and URL Inspection API",
+      "status": "TODO",
+      "order": 3,
+      "epic_ids": [
+        "EPIC-005"
+      ]
+    },
+    {
+      "id": "phase-4-queue-scheduling",
+      "name": "Queue & Scheduling",
+      "description": "Priority queue management, rate limiting, and job scheduling",
+      "status": "TODO",
+      "order": 4,
+      "epic_ids": [
+        "EPIC-006",
+        "EPIC-007",
+        "EPIC-008"
+      ]
+    },
+    {
+      "id": "phase-5-web-ui",
+      "name": "Web UI",
+      "description": "Dashboard, queue management interface, and real-time updates",
+      "status": "TODO",
+      "order": 5,
+      "epic_ids": [
+        "EPIC-009",
+        "EPIC-010"
+      ]
+    },
+    {
+      "id": "phase-6-deployment",
+      "name": "Deployment",
+      "description": "Docker containerization, documentation, and production readiness",
+      "status": "TODO",
+      "order": 6,
+      "epic_ids": [
+        "EPIC-011"
+      ]
+    }
+  ],
+  "epics": [
+    {
+      "id": "EPIC-001",
+      "title": "Project Infrastructure",
+      "description": "Project structure, dependencies, configuration management, and development tooling",
+      "phase_id": "phase-1-foundation",
+      "status": "TODO",
+      "depends_on": [],
+      "story_ids": [
+        "SEO-001",
+        "SEO-002",
+        "SEO-003",
+        "SEO-004",
+        "SEO-005"
+      ]
+    },
+    {
+      "id": "EPIC-002",
+      "title": "Database & Data Models",
+      "description": "SQLite setup with WAL mode, SQLAlchemy ORM models, and database migrations",
+      "phase_id": "phase-1-foundation",
+      "status": "TODO",
+      "depends_on": [
+        "EPIC-001"
+      ],
+      "story_ids": [
+        "SEO-006",
+        "SEO-007",
+        "SEO-008",
+        "SEO-009",
+        "SEO-010",
+        "SEO-011"
+      ]
+    },
+    {
+      "id": "EPIC-003",
+      "title": "Website & Configuration Management",
+      "description": "CRUD operations for websites, service accounts, and sitemap configurations",
+      "phase_id": "phase-2-core-features",
+      "status": "TODO",
+      "depends_on": [
+        "EPIC-002"
+      ],
+      "story_ids": [
+        "SEO-012",
+        "SEO-013",
+        "SEO-014",
+        "SEO-015",
+        "SEO-016"
+      ]
+    },
+    {
+      "id": "EPIC-004",
+      "title": "Sitemap Parsing & URL Discovery",
+      "description": "Async sitemap fetching, XML parsing, change detection, and URL extraction",
+      "phase_id": "phase-2-core-features",
+      "status": "TODO",
+      "depends_on": [
+        "EPIC-003"
+      ],
+      "story_ids": [
+        "SEO-017",
+        "SEO-018",
+        "SEO-019",
+        "SEO-020",
+        "SEO-021",
+        "SEO-022"
+      ]
+    },
+    {
+      "id": "EPIC-005",
+      "title": "Google Authentication & API Clients",
+      "description": "Service account credential management and Google API client implementations",
+      "phase_id": "phase-3-api-integration",
+      "status": "TODO",
+      "depends_on": [
+        "EPIC-002"
+      ],
+      "story_ids": [
+        "SEO-023",
+        "SEO-024",
+        "SEO-025",
+        "SEO-026",
+        "SEO-027",
+        "SEO-028"
+      ]
+    },
+    {
+      "id": "EPIC-006",
+      "title": "Quota & Rate Limiting",
+      "description": "Per-website quota tracking, token bucket rate limiter, and crash-safe state persistence",
+      "phase_id": "phase-4-queue-scheduling",
+      "status": "TODO",
+      "depends_on": [
+        "EPIC-002",
+        "EPIC-005"
+      ],
+      "story_ids": [
+        "SEO-029",
+        "SEO-030",
+        "SEO-031",
+        "SEO-032",
+        "SEO-033"
+      ]
+    },
+    {
+      "id": "EPIC-007",
+      "title": "Priority Queue Management",
+      "description": "Priority calculation, queue operations, manual overrides, and batch processing",
+      "phase_id": "phase-4-queue-scheduling",
+      "status": "TODO",
+      "depends_on": [
+        "EPIC-002",
+        "EPIC-004"
+      ],
+      "story_ids": [
+        "SEO-034",
+        "SEO-035",
+        "SEO-036",
+        "SEO-037",
+        "SEO-038"
+      ]
+    },
+    {
+      "id": "EPIC-008",
+      "title": "Scheduler & Processing Pipeline",
+      "description": "APScheduler setup, URL submission jobs, index verification jobs, and overlap protection",
+      "phase_id": "phase-4-queue-scheduling",
+      "status": "TODO",
+      "depends_on": [
+        "EPIC-005",
+        "EPIC-006",
+        "EPIC-007"
+      ],
+      "story_ids": [
+        "SEO-039",
+        "SEO-040",
+        "SEO-041",
+        "SEO-042",
+        "SEO-043",
+        "SEO-044"
+      ]
+    },
+    {
+      "id": "EPIC-009",
+      "title": "Web UI - Dashboard & Stats",
+      "description": "FastAPI routes, HTMX + Jinja2 templates, and main dashboard interface",
+      "phase_id": "phase-5-web-ui",
+      "status": "TODO",
+      "depends_on": [
+        "EPIC-002"
+      ],
+      "story_ids": [
+        "SEO-045",
+        "SEO-046",
+        "SEO-047",
+        "SEO-048",
+        "SEO-049"
+      ]
+    },
+    {
+      "id": "EPIC-010",
+      "title": "Web UI - Queue Management",
+      "description": "Queue listing, priority adjustment UI, and manual action triggers",
+      "phase_id": "phase-5-web-ui",
+      "status": "TODO",
+      "depends_on": [
+        "EPIC-007",
+        "EPIC-009"
+      ],
+      "story_ids": [
+        "SEO-050",
+        "SEO-051",
+        "SEO-052",
+        "SEO-053",
+        "SEO-054"
+      ]
+    },
+    {
+      "id": "EPIC-011",
+      "title": "Deployment & DevOps",
+      "description": "Docker containerization, environment configuration, health checks, and documentation",
+      "phase_id": "phase-6-deployment",
+      "status": "TODO",
+      "depends_on": [
+        "EPIC-001",
+        "EPIC-002",
+        "EPIC-003",
+        "EPIC-004",
+        "EPIC-005",
+        "EPIC-006",
+        "EPIC-007",
+        "EPIC-008",
+        "EPIC-009",
+        "EPIC-010"
+      ],
+      "story_ids": [
+        "SEO-055",
+        "SEO-056",
+        "SEO-057",
+        "SEO-058",
+        "SEO-059",
+        "SEO-060"
+      ]
+    }
+  ],
+  "next_actions": {
+    "ready_to_start": [
+      "SEO-001"
+    ],
+    "critical_path": [
+      "SEO-001",
+      "SEO-002",
+      "SEO-006",
+      "SEO-007",
+      "SEO-008",
+      "SEO-009",
+      "SEO-022",
+      "SEO-034",
+      "SEO-035",
+      "SEO-037",
+      "SEO-051",
+      "SEO-054"
+    ],
+    "by_phase": {
+      "phase-1-foundation": [
+        "SEO-001",
+        "SEO-002",
+        "SEO-006",
+        "SEO-007",
+        "SEO-008",
+        "SEO-009",
+        "SEO-003",
+        "SEO-004",
+        "SEO-005",
+        "SEO-010",
+        "SEO-011"
+      ],
+      "phase-2-core-features": [
+        "SEO-012",
+        "SEO-013",
+        "SEO-014",
+        "SEO-017",
+        "SEO-015",
+        "SEO-018",
+        "SEO-019",
+        "SEO-020",
+        "SEO-021",
+        "SEO-022",
+        "SEO-016"
+      ],
+      "phase-3-api-integration": [
+        "SEO-023",
+        "SEO-024",
+        "SEO-025",
+        "SEO-026",
+        "SEO-027",
+        "SEO-028"
+      ],
+      "phase-4-queue-scheduling": [
+        "SEO-029",
+        "SEO-039",
+        "SEO-030",
+        "SEO-031",
+        "SEO-032",
+        "SEO-033",
+        "SEO-034",
+        "SEO-040",
+        "SEO-041",
+        "SEO-035",
+        "SEO-036",
+        "SEO-042",
+        "SEO-043",
+        "SEO-037",
+        "SEO-038",
+        "SEO-044"
+      ],
+      "phase-5-web-ui": [
+        "SEO-045",
+        "SEO-046",
+        "SEO-048",
+        "SEO-049",
+        "SEO-050",
+        "SEO-052",
+        "SEO-051",
+        "SEO-047",
+        "SEO-053",
+        "SEO-054"
+      ],
+      "phase-6-deployment": [
+        "SEO-055",
+        "SEO-056",
+        "SEO-057",
+        "SEO-058",
+        "SEO-059",
+        "SEO-060"
+      ]
+    },
+    "in_progress": [],
+    "completed": [],
+    "blocked": [
+      "SEO-002",
+      "SEO-006",
+      "SEO-007",
+      "SEO-008",
+      "SEO-009",
+      "SEO-012",
+      "SEO-013",
+      "SEO-014",
+      "SEO-017",
+      "SEO-023",
+      "SEO-024",
+      "SEO-025",
+      "SEO-029",
+      "SEO-039",
+      "SEO-045",
+      "SEO-055",
+      "SEO-056",
+      "SEO-003",
+      "SEO-004",
+      "SEO-005",
+      "SEO-010",
+      "SEO-011",
+      "SEO-015",
+      "SEO-018",
+      "SEO-019",
+      "SEO-020",
+      "SEO-021",
+      "SEO-022",
+      "SEO-026",
+      "SEO-027",
+      "SEO-030",
+      "SEO-031",
+      "SEO-032",
+      "SEO-033",
+      "SEO-034",
+      "SEO-040",
+      "SEO-041",
+      "SEO-035",
+      "SEO-036",
+      "SEO-042",
+      "SEO-043",
+      "SEO-046",
+      "SEO-048",
+      "SEO-049",
+      "SEO-050",
+      "SEO-052",
+      "SEO-057",
+      "SEO-058",
+      "SEO-059",
+      "SEO-016",
+      "SEO-028",
+      "SEO-037",
+      "SEO-051",
+      "SEO-038",
+      "SEO-047",
+      "SEO-044",
+      "SEO-053",
+      "SEO-054",
+      "SEO-060"
+    ]
+  },
+  "execution_guide": {
+    "how_to_use": "Read next_actions.ready_to_start for tasks that can be started immediately. Pick the first one. After completing a task, update its status to DONE and recalculate blocked_by/is_ready for dependent tasks.",
+    "priority_order": [
+      "critical",
+      "high",
+      "medium",
+      "low"
+    ],
+    "workflow": "1. Check next_actions.ready_to_start\n2. Pick highest priority task\n3. Implement and mark DONE\n4. Repeat",
+    "recovery_procedure": "On restart, review session_state and work_sessions, then resume current_story or next_actions.ready_to_start[0].",
+    "starting_a_task": "Set story status to IN_PROGRESS, set started_at/status_changed_at, update session_state.current_story and current_session_id.",
+    "completing_a_task": "Set story status to DONE, set completed_at/status_changed_at, append work session, and recompute next_actions/session_state/metadata.",
+    "source_of_truth": {
+      "story_lifecycle": "user_stories[].status",
+      "dependency_readiness": "user_stories[].is_ready + user_stories[].blocked_by",
+      "actionable_queues": "next_actions.* (derived)",
+      "aggregate_metrics": "metadata.status_counts, metadata.total_story_points, metadata.stories_by_priority (derived)"
+    }
+  },
+  "user_stories": [
+    {
+      "id": "SEO-001",
+      "epic_id": "EPIC-001",
+      "title": "[IMPL] Project structure with pyproject.toml",
+      "user_story": "As a developer, I want a properly structured Python project with modern packaging so that dependencies are managed consistently",
+      "description": "Create project structure with pyproject.toml using modern Python packaging standards. Include src layout, proper package configuration, and dependency groups for dev/prod.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "pyproject.toml exists with project metadata (name, version, description)",
+        "Dependencies defined: fastapi, uvicorn, sqlalchemy, aiosqlite, httpx, lxml, google-api-python-client, google-auth, apscheduler, jinja2, python-dotenv, pydantic",
+        "Dev dependencies: pytest, pytest-asyncio, pytest-cov, ruff, mypy, black",
+        "Package is installable with `pip install -e .`",
+        "Entry point defined for running the application"
+      ],
+      "depends_on": [],
+      "labels": [
+        "infrastructure",
+        "setup",
+        "python"
+      ],
+      "implementation_order": 1,
+      "blocked_by": [],
+      "is_ready": true,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-002",
+      "epic_id": "EPIC-001",
+      "title": "[CONFIG] Environment configuration (.env handling)",
+      "user_story": "As a developer, I want environment-based configuration so that the app can be configured without code changes",
+      "description": "Implement configuration management using Pydantic Settings with .env file support. Include validation for required settings and sensible defaults.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "Settings class using pydantic-settings with BaseSettings",
+        "Loads from .env file automatically",
+        "Required settings: DATABASE_URL, SECRET_KEY",
+        "Optional settings with defaults: HOST, PORT, LOG_LEVEL, SCHEDULER_ENABLED",
+        ".env.example file provided with all options documented",
+        "Settings are type-validated and raise clear errors for missing required values"
+      ],
+      "depends_on": [
+        "SEO-001"
+      ],
+      "labels": [
+        "infrastructure",
+        "configuration"
+      ],
+      "implementation_order": 2,
+      "blocked_by": [
+        "SEO-001"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-006",
+      "epic_id": "EPIC-002",
+      "title": "[IMPL] SQLite database connection with WAL mode",
+      "user_story": "As a developer, I want a properly configured SQLite connection so that the database is performant and reliable",
+      "description": "Implement async SQLite connection using aiosqlite with WAL mode enabled for better concurrent access. Include connection pooling and session management.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "Database engine created with SQLAlchemy async engine",
+        "WAL mode enabled via PRAGMA journal_mode=WAL",
+        "Connection pool configured with appropriate pool size",
+        "Session factory pattern with dependency injection for FastAPI",
+        "Database file created in configured path on first run",
+        "Context manager for session handling with automatic commit/rollback"
+      ],
+      "depends_on": [
+        "SEO-001",
+        "SEO-002"
+      ],
+      "labels": [
+        "database",
+        "sqlite",
+        "async"
+      ],
+      "implementation_order": 3,
+      "blocked_by": [
+        "SEO-001",
+        "SEO-002"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-007",
+      "epic_id": "EPIC-002",
+      "title": "[IMPL] Website and ServiceAccount models",
+      "user_story": "As a system, I want to store website and service account data so that multiple sites can be managed independently",
+      "description": "Create SQLAlchemy models for Website (domain, site_url, timestamps, is_active) and ServiceAccount (website_id, name, credentials_path, scopes).",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "Website model: id (UUID), domain (unique), site_url, created_at, updated_at, is_active",
+        "ServiceAccount model: id (UUID), website_id (FK), name, credentials_path, scopes (JSON), created_at",
+        "Relationship: Website has one ServiceAccount, ServiceAccount belongs to Website",
+        "Proper indexes on domain, website_id",
+        "Cascading deletes configured appropriately",
+        "Pydantic schemas for API serialization (WebsiteCreate, WebsiteRead, etc.)"
+      ],
+      "depends_on": [
+        "SEO-006"
+      ],
+      "labels": [
+        "database",
+        "models",
+        "orm"
+      ],
+      "implementation_order": 4,
+      "blocked_by": [
+        "SEO-006"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-008",
+      "epic_id": "EPIC-002",
+      "title": "[IMPL] Sitemap model with type discrimination",
+      "user_story": "As a system, I want to store sitemap configurations so that URLs can be discovered from multiple sources per website",
+      "description": "Create Sitemap model with URL, type (index/urlset), caching headers (etag, last_modified), and fetch metadata.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "Sitemap model: id (UUID), website_id (FK), url, sitemap_type (enum: INDEX, URLSET), last_fetched, etag, last_modified_header, is_active, created_at",
+        "Foreign key to Website with cascade rules",
+        "Unique constraint on (website_id, url)",
+        "Index on website_id for efficient queries",
+        "Pydantic schemas for CRUD operations"
+      ],
+      "depends_on": [
+        "SEO-007"
+      ],
+      "labels": [
+        "database",
+        "models",
+        "sitemap"
+      ],
+      "implementation_order": 5,
+      "blocked_by": [
+        "SEO-007"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-009",
+      "epic_id": "EPIC-002",
+      "title": "[IMPL] URL model with priority tracking",
+      "user_story": "As a system, I want to store discovered URLs so that they can be queued for submission and tracking",
+      "description": "Create URL model with the URL itself, lastmod from sitemap, priority fields (auto and manual), and timestamps.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "URL model: id (UUID), website_id (FK), sitemap_id (FK, nullable), url, lastmod, changefreq, sitemap_priority, current_priority, manual_priority_override, discovered_at, updated_at",
+        "Unique constraint on url within a website",
+        "Indexes on website_id, current_priority, updated_at",
+        "current_priority defaults to calculated value, can be overridden",
+        "manual_priority_override allows manual override (null = auto, value = override)",
+        "Pydantic schemas for API serialization"
+      ],
+      "depends_on": [
+        "SEO-007",
+        "SEO-008"
+      ],
+      "labels": [
+        "database",
+        "models",
+        "queue"
+      ],
+      "implementation_order": 6,
+      "blocked_by": [
+        "SEO-007",
+        "SEO-008"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-012",
+      "epic_id": "EPIC-003",
+      "title": "[IMPL] Website CRUD API endpoints",
+      "user_story": "As a user, I want to manage websites via API so that I can add, view, update, and delete website configurations",
+      "description": "Implement RESTful CRUD endpoints for Website resource with proper validation, error handling, and relationship loading.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "POST /api/websites - Create new website with validation",
+        "GET /api/websites - List all websites with optional filtering (is_active)",
+        "GET /api/websites/{id} - Get single website with service account and sitemap counts",
+        "PUT /api/websites/{id} - Update website fields",
+        "DELETE /api/websites/{id} - Soft delete (set is_active=false) or hard delete option",
+        "Input validation using Pydantic schemas",
+        "Proper HTTP status codes (201, 200, 404, 422, etc.)"
+      ],
+      "depends_on": [
+        "SEO-007"
+      ],
+      "labels": [
+        "api",
+        "crud",
+        "websites"
+      ],
+      "implementation_order": 7,
+      "blocked_by": [
+        "SEO-007"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-013",
+      "epic_id": "EPIC-003",
+      "title": "[IMPL] Service Account CRUD API endpoints",
+      "user_story": "As a user, I want to manage service accounts via API so that I can configure Google API credentials per website",
+      "description": "Implement CRUD endpoints for ServiceAccount with secure credential path handling and scope management.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "POST /api/websites/{website_id}/service-account - Create/attach service account",
+        "GET /api/websites/{website_id}/service-account - Get service account (without exposing credential contents)",
+        "PUT /api/websites/{website_id}/service-account - Update service account",
+        "DELETE /api/websites/{website_id}/service-account - Remove service account",
+        "Validation that credentials_path points to a valid JSON file",
+        "Scopes validated against allowed values (indexing, webmasters)",
+        "Credential file existence check on create/update"
+      ],
+      "depends_on": [
+        "SEO-007",
+        "SEO-012"
+      ],
+      "labels": [
+        "api",
+        "crud",
+        "service-accounts"
+      ],
+      "implementation_order": 8,
+      "blocked_by": [
+        "SEO-007",
+        "SEO-012"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-014",
+      "epic_id": "EPIC-003",
+      "title": "[IMPL] Sitemap source CRUD API endpoints",
+      "user_story": "As a user, I want to configure sitemap sources via API so that URLs can be discovered from multiple sitemap locations",
+      "description": "Implement CRUD endpoints for Sitemap configurations with URL validation and type detection.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "POST /api/websites/{website_id}/sitemaps - Add sitemap source",
+        "GET /api/websites/{website_id}/sitemaps - List all sitemaps for website",
+        "GET /api/sitemaps/{id} - Get single sitemap details",
+        "PUT /api/sitemaps/{id} - Update sitemap configuration",
+        "DELETE /api/sitemaps/{id} - Remove sitemap source",
+        "URL validation (must be valid HTTP/HTTPS URL)",
+        "Optional: auto-detect sitemap type on creation by fetching"
+      ],
+      "depends_on": [
+        "SEO-008",
+        "SEO-012"
+      ],
+      "labels": [
+        "api",
+        "crud",
+        "sitemaps"
+      ],
+      "implementation_order": 9,
+      "blocked_by": [
+        "SEO-008",
+        "SEO-012"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-017",
+      "epic_id": "EPIC-004",
+      "title": "[IMPL] Async sitemap fetching with httpx",
+      "user_story": "As a system, I want to fetch sitemaps asynchronously so that multiple sitemaps can be processed efficiently",
+      "description": "Implement async HTTP client for fetching sitemaps with proper timeout, retry, and error handling.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "Async function using httpx.AsyncClient",
+        "Configurable timeout (default 30 seconds)",
+        "Follow redirects (up to 5)",
+        "Support for conditional requests (If-None-Match, If-Modified-Since)",
+        "Proper error handling for network failures, timeouts, HTTP errors",
+        "Return response content, etag, and last-modified header",
+        "Retry logic with exponential backoff for transient failures"
+      ],
+      "depends_on": [
+        "SEO-001"
+      ],
+      "labels": [
+        "sitemap",
+        "async",
+        "http"
+      ],
+      "implementation_order": 10,
+      "blocked_by": [
+        "SEO-001"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-023",
+      "epic_id": "EPIC-005",
+      "title": "[IMPL] Service account credential loader",
+      "user_story": "As a system, I want to load service account credentials so that I can authenticate with Google APIs",
+      "description": "Implement secure credential loading from JSON key files with proper error handling.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "Load credentials from JSON file path using google.oauth2.service_account",
+        "Validate credentials structure (required fields present)",
+        "Cache loaded credentials to avoid repeated file reads",
+        "Clear error messages for missing/invalid credential files",
+        "Support for credentials with different scope requirements",
+        "Unit tests with mock credential files"
+      ],
+      "depends_on": [
+        "SEO-007"
+      ],
+      "labels": [
+        "api",
+        "google",
+        "authentication"
+      ],
+      "implementation_order": 11,
+      "blocked_by": [
+        "SEO-007"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-024",
+      "epic_id": "EPIC-005",
+      "title": "[IMPL] Google Indexing API v3 client",
+      "user_story": "As a system, I want to submit URLs to Google's Indexing API so that Google is notified of content changes",
+      "description": "Implement client wrapper for Google Indexing API v3 with publish, batch, and metadata methods.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 5,
+      "acceptance_criteria": [
+        "Build Indexing API service using googleapiclient.discovery",
+        "submit_url(url, action='URL_UPDATED') method for single URL",
+        "batch_submit(urls, action='URL_UPDATED') method for up to 100 URLs",
+        "get_metadata(url) method to check notification status",
+        "Proper error handling for quota exceeded, invalid URLs, auth errors",
+        "Return structured response with success/failure status per URL",
+        "Async wrapper for synchronous Google API client"
+      ],
+      "depends_on": [
+        "SEO-023"
+      ],
+      "labels": [
+        "api",
+        "google",
+        "indexing"
+      ],
+      "implementation_order": 12,
+      "blocked_by": [
+        "SEO-023"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-025",
+      "epic_id": "EPIC-005",
+      "title": "[IMPL] Search Console URL Inspection API client",
+      "user_story": "As a system, I want to check URL index status so that I can verify actual indexing state",
+      "description": "Implement client wrapper for Google Search Console URL Inspection API.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 5,
+      "acceptance_criteria": [
+        "Build Search Console service using googleapiclient.discovery",
+        "inspect_url(url, site_url) method for single URL inspection",
+        "Parse response to extract: verdict, coverage_state, last_crawl_time, indexing_state, robots_txt_state",
+        "Map coverage_state to system status (INDEXED, NOT_INDEXED, BLOCKED, etc.)",
+        "Handle API errors gracefully (rate limits, auth failures)",
+        "Return structured IndexStatusResult object",
+        "Async wrapper for synchronous Google API client"
+      ],
+      "depends_on": [
+        "SEO-023"
+      ],
+      "labels": [
+        "api",
+        "google",
+        "verification"
+      ],
+      "implementation_order": 13,
+      "blocked_by": [
+        "SEO-023"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-029",
+      "epic_id": "EPIC-006",
+      "title": "[IMPL] Per-website daily quota tracking",
+      "user_story": "As a system, I want to track API quota per website so that I don't exceed Google's limits",
+      "description": "Implement quota tracking service that monitors daily usage per website and persists state to database.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "QuotaUsage model: id, website_id, date, indexing_count, inspection_count, created_at, updated_at",
+        "Service method: increment_usage(website_id, api_type) -> remaining_quota",
+        "Service method: get_remaining_quota(website_id, api_type) -> int",
+        "Service method: check_quota_available(website_id, api_type, count) -> bool",
+        "Quota limits configurable per API type (default: 200 indexing, 2000 inspection)",
+        "Automatic reset detection when date changes",
+        "Database persistence for crash recovery"
+      ],
+      "depends_on": [
+        "SEO-007"
+      ],
+      "labels": [
+        "quota",
+        "rate-limiting",
+        "tracking"
+      ],
+      "implementation_order": 14,
+      "blocked_by": [
+        "SEO-007"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-039",
+      "epic_id": "EPIC-008",
+      "title": "[IMPL] APScheduler async setup",
+      "user_story": "As a system, I want a configured scheduler so that jobs run automatically at specified times",
+      "description": "Set up APScheduler with AsyncIOScheduler for running background jobs.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "AsyncIOScheduler configured and started on app startup",
+        "Job store using SQLite for persistence",
+        "Support for interval triggers and cron triggers",
+        "Scheduler enabled/disabled via configuration",
+        "Graceful shutdown handling",
+        "API endpoints to pause/resume scheduler and individual jobs",
+        "Logging of job start/success/failure"
+      ],
+      "depends_on": [
+        "SEO-001"
+      ],
+      "labels": [
+        "scheduler",
+        "apscheduler",
+        "async"
+      ],
+      "implementation_order": 15,
+      "blocked_by": [
+        "SEO-001"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-045",
+      "epic_id": "EPIC-009",
+      "title": "[IMPL] FastAPI app setup with Jinja2 templates",
+      "user_story": "As a developer, I want a FastAPI app with Jinja2 so that I can serve HTML templates",
+      "description": "Set up FastAPI application with Jinja2 template rendering, static file serving, and base configuration.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "FastAPI app factory pattern",
+        "Jinja2Templates configured with templates directory",
+        "Static files mounted at /static",
+        "Base template with common layout (header, footer, navigation)",
+        "Template context processors for common data (current_user, settings)",
+        "HTMX included in base template",
+        "Alpine.js included for interactive components (optional)"
+      ],
+      "depends_on": [
+        "SEO-001",
+        "SEO-002"
+      ],
+      "labels": [
+        "web-ui",
+        "fastapi",
+        "jinja2"
+      ],
+      "implementation_order": 16,
+      "blocked_by": [
+        "SEO-001",
+        "SEO-002"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-055",
+      "epic_id": "EPIC-011",
+      "title": "[IMPL] Dockerfile for the application",
+      "user_story": "As a developer, I want a Dockerfile so that the app can be containerized",
+      "description": "Create production-ready Dockerfile with multi-stage build for optimized image size.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "Multi-stage build (builder + runtime)",
+        "Python 3.11+ slim base image",
+        "Dependencies installed in virtual environment",
+        "Non-root user for security",
+        "Proper WORKDIR and ENTRYPOINT",
+        "Health check instruction",
+        "Image size < 500MB",
+        ".dockerignore for unnecessary files"
+      ],
+      "depends_on": [
+        "SEO-001"
+      ],
+      "labels": [
+        "deployment",
+        "docker",
+        "devops"
+      ],
+      "implementation_order": 17,
+      "blocked_by": [
+        "SEO-001"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-056",
+      "epic_id": "EPIC-011",
+      "title": "[IMPL] docker-compose.yml with services",
+      "user_story": "As a developer, I want docker-compose so that I can easily run the entire stack",
+      "description": "Create docker-compose.yml with app service, volumes, and networking configuration.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "App service with build context",
+        "Volume for SQLite database persistence",
+        "Volume for service account credentials",
+        "Environment variable configuration",
+        "Port mapping configurable",
+        "Restart policy: unless-stopped",
+        "Health check configuration",
+        "Optional: separate volume for logs"
+      ],
+      "depends_on": [
+        "SEO-055"
+      ],
+      "labels": [
+        "deployment",
+        "docker",
+        "devops"
+      ],
+      "implementation_order": 18,
+      "blocked_by": [
+        "SEO-055"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-003",
+      "epic_id": "EPIC-001",
+      "title": "[IMPL] Logging setup with structured output",
+      "user_story": "As a developer, I want structured logging so that logs are searchable and debuggable in production",
+      "description": "Configure Python logging with JSON structured output for production, human-readable for development. Include correlation IDs and request context.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "Logging configured via settings (LOG_LEVEL, LOG_FORMAT)",
+        "JSON output when LOG_FORMAT=json, human-readable otherwise",
+        "All logs include timestamp, level, logger name, and message",
+        "Request logging middleware for FastAPI with timing info",
+        "Log file rotation configured for file output",
+        "Sensitive data (credentials, tokens) is never logged"
+      ],
+      "depends_on": [
+        "SEO-001"
+      ],
+      "labels": [
+        "infrastructure",
+        "logging"
+      ],
+      "implementation_order": 19,
+      "blocked_by": [
+        "SEO-001"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-004",
+      "epic_id": "EPIC-001",
+      "title": "[CONFIG] Code quality tooling (ruff, mypy, black)",
+      "user_story": "As a developer, I want automated code quality checks so that code style is consistent and type errors are caught early",
+      "description": "Configure ruff for linting/formatting, mypy for type checking, with pre-commit hooks and CI integration scripts.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "ruff.toml or pyproject.toml [tool.ruff] section configured",
+        "mypy configuration in pyproject.toml with strict mode",
+        "Scripts in pyproject.toml: lint, format, typecheck",
+        ".pre-commit-config.yaml with ruff and mypy hooks",
+        "All config files pass self-check on existing boilerplate"
+      ],
+      "depends_on": [
+        "SEO-001"
+      ],
+      "labels": [
+        "infrastructure",
+        "tooling",
+        "quality"
+      ],
+      "implementation_order": 20,
+      "blocked_by": [
+        "SEO-001"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-005",
+      "epic_id": "EPIC-001",
+      "title": "[IMPL] Directory structure and module layout",
+      "user_story": "As a developer, I want a clear project structure so that code is organized and discoverable",
+      "description": "Create the complete directory structure with placeholder modules for all major components: api, models, services, schemas, utils.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 1,
+      "acceptance_criteria": [
+        "src/seo_indexing_tracker/ main package directory",
+        "Subdirectories: api/, models/, services/, schemas/, utils/, templates/, static/",
+        "__init__.py files with version and public exports in each package",
+        "main.py entry point with FastAPI app factory",
+        "README.md with basic project description and setup instructions"
+      ],
+      "depends_on": [
+        "SEO-001"
+      ],
+      "labels": [
+        "infrastructure",
+        "setup"
+      ],
+      "implementation_order": 21,
+      "blocked_by": [
+        "SEO-001"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-010",
+      "epic_id": "EPIC-002",
+      "title": "[IMPL] IndexStatus model for verification results",
+      "user_story": "As a system, I want to store index verification results so that indexing progress can be tracked over time",
+      "description": "Create IndexStatus model for storing URL Inspection API results including coverage_state, verdict, crawl_time, and timestamps.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "IndexStatus model: id (UUID), url_id (FK), coverage_state, verdict, last_crawl_time, indexed_at, checked_at, robots_txt_state, indexing_state, page_fetch_state, google_canonical, user_canonical, raw_response (JSON)",
+        "One-to-many relationship: URL has many IndexStatus records (history)",
+        "Index on url_id, checked_at for efficient queries",
+        "verdict enum: PASS, FAIL, NEUTRAL, PARTIAL",
+        "coverage_state stored as string from API response",
+        "Pydantic schemas for API responses"
+      ],
+      "depends_on": [
+        "SEO-009"
+      ],
+      "labels": [
+        "database",
+        "models",
+        "verification"
+      ],
+      "implementation_order": 22,
+      "blocked_by": [
+        "SEO-009"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-011",
+      "epic_id": "EPIC-002",
+      "title": "[IMPL] SubmissionLog model for audit trail",
+      "user_story": "As a system, I want to log all API submissions so that issues can be debugged and quota usage tracked",
+      "description": "Create SubmissionLog model for recording every Indexing API call with action, response, and status.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "SubmissionLog model: id (UUID), url_id (FK), action (enum: URL_UPDATED, URL_DELETED), api_response (JSON), submitted_at, status (enum: SUCCESS, FAILED, RATE_LIMITED), error_message",
+        "Index on url_id, submitted_at for efficient queries",
+        "Index on status for filtering failed submissions",
+        "action and status stored as enum types",
+        "api_response stores the full API response for debugging",
+        "Pydantic schemas for log retrieval"
+      ],
+      "depends_on": [
+        "SEO-009"
+      ],
+      "labels": [
+        "database",
+        "models",
+        "logging"
+      ],
+      "implementation_order": 23,
+      "blocked_by": [
+        "SEO-009"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-015",
+      "epic_id": "EPIC-003",
+      "title": "[IMPL] Configuration validation service",
+      "user_story": "As a user, I want configuration validated before saving so that I catch errors early",
+      "description": "Create a validation service that checks service account credentials, sitemap accessibility, and website reachability.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "Service class with methods: validate_service_account(), validate_sitemap_url(), validate_website_url()",
+        "validate_service_account() loads and verifies credential JSON is valid",
+        "validate_sitemap_url() makes HEAD request to check accessibility",
+        "validate_website_url() verifies site_url is reachable",
+        "Returns detailed error messages for each validation failure",
+        "Used by CRUD endpoints for pre-save validation",
+        "Can be called independently via API endpoint for testing"
+      ],
+      "depends_on": [
+        "SEO-012",
+        "SEO-013",
+        "SEO-014"
+      ],
+      "labels": [
+        "api",
+        "validation",
+        "services"
+      ],
+      "implementation_order": 24,
+      "blocked_by": [
+        "SEO-012",
+        "SEO-013",
+        "SEO-014"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-018",
+      "epic_id": "EPIC-004",
+      "title": "[IMPL] Gzip decompression support",
+      "user_story": "As a system, I want to handle gzipped sitemaps so that compressed sitemap files are processed correctly",
+      "description": "Implement automatic detection and decompression of gzipped sitemap content.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "Detect gzip by file extension (.xml.gz) and Content-Encoding header",
+        "Decompress using Python gzip module",
+        "Handle decompression errors gracefully",
+        "Support streaming decompression for large files",
+        "Integration with sitemap fetcher from SEO-017"
+      ],
+      "depends_on": [
+        "SEO-017"
+      ],
+      "labels": [
+        "sitemap",
+        "gzip",
+        "parsing"
+      ],
+      "implementation_order": 25,
+      "blocked_by": [
+        "SEO-017"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-019",
+      "epic_id": "EPIC-004",
+      "title": "[IMPL] Sitemap type detection",
+      "user_story": "As a system, I want to detect sitemap types so that index files and urlsets are processed differently",
+      "description": "Implement detection logic to distinguish sitemap index files from urlset sitemaps.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "Function to parse XML root and detect type",
+        "Returns 'INDEX' for <sitemapindex> root element",
+        "Returns 'URLSET' for <urlset> root element",
+        "Handles namespace variations (with/without namespace)",
+        "Raises clear error for invalid/unknown sitemap formats",
+        "Unit tests for edge cases (malformed XML, unknown types)"
+      ],
+      "depends_on": [
+        "SEO-017",
+        "SEO-018"
+      ],
+      "labels": [
+        "sitemap",
+        "parsing",
+        "xml"
+      ],
+      "implementation_order": 26,
+      "blocked_by": [
+        "SEO-017",
+        "SEO-018"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-020",
+      "epic_id": "EPIC-004",
+      "title": "[IMPL] Recursive sitemap index parsing",
+      "user_story": "As a system, I want to recursively parse sitemap indexes so that all nested sitemaps are discovered",
+      "description": "Implement recursive parsing of sitemap index files to extract all child sitemap URLs.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 5,
+      "acceptance_criteria": [
+        "Parse <sitemap> elements from sitemap index",
+        "Extract <loc> and <lastmod> for each child sitemap",
+        "Recursively fetch and parse child sitemaps",
+        "Configurable max depth to prevent infinite recursion",
+        "Detect and handle circular references",
+        "Return flat list of all discovered sitemap URLs",
+        "Progress tracking for large sitemap hierarchies"
+      ],
+      "depends_on": [
+        "SEO-017",
+        "SEO-019"
+      ],
+      "labels": [
+        "sitemap",
+        "parsing",
+        "recursion"
+      ],
+      "implementation_order": 27,
+      "blocked_by": [
+        "SEO-017",
+        "SEO-019"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-021",
+      "epic_id": "EPIC-004",
+      "title": "[IMPL] Streaming XML parsing with lxml",
+      "user_story": "As a system, I want to stream-parse large sitemaps so that memory usage is minimized",
+      "description": "Implement memory-efficient XML parsing using lxml's iterparse for processing large sitemaps.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 5,
+      "acceptance_criteria": [
+        "Use lxml.etree.iterparse for streaming parsing",
+        "Extract <url>, <loc>, <lastmod>, <changefreq>, <priority> elements",
+        "Handle XML namespace correctly",
+        "Clear elements after processing to free memory",
+        "Yield parsed URLs as generator for memory efficiency",
+        "Handle malformed URLs gracefully (skip with warning)",
+        "Support for sitemap extensions (news, image, video) - extract basic URL at minimum"
+      ],
+      "depends_on": [
+        "SEO-019"
+      ],
+      "labels": [
+        "sitemap",
+        "parsing",
+        "xml",
+        "performance"
+      ],
+      "implementation_order": 28,
+      "blocked_by": [
+        "SEO-019"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-022",
+      "epic_id": "EPIC-004",
+      "title": "[IMPL] Change detection via lastmod comparison",
+      "user_story": "As a system, I want to detect URL changes so that only modified content is prioritized for submission",
+      "description": "Implement logic to compare sitemap lastmod values with stored URL records to identify new and changed URLs.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 5,
+      "acceptance_criteria": [
+        "Service class with discover_urls() method",
+        "Compare sitemap lastmod with stored URL lastmod",
+        "Mark URLs as 'new', 'modified', or 'unchanged'",
+        "Handle URLs with no lastmod (treat as potentially changed)",
+        "Batch insert new URLs to database",
+        "Update existing URLs with new lastmod and mark as modified",
+        "Return summary: total discovered, new count, modified count, unchanged count",
+        "Update Sitemap.last_fetched, etag, last_modified_header after successful fetch"
+      ],
+      "depends_on": [
+        "SEO-009",
+        "SEO-021"
+      ],
+      "labels": [
+        "sitemap",
+        "discovery",
+        "change-detection"
+      ],
+      "implementation_order": 29,
+      "blocked_by": [
+        "SEO-009",
+        "SEO-021"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-026",
+      "epic_id": "EPIC-005",
+      "title": "[IMPL] GoogleAPIClient factory with per-website isolation",
+      "user_story": "As a system, I want per-website API clients so that quotas are isolated per service account",
+      "description": "Implement factory class that creates and caches API clients per website using their service account credentials.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "GoogleAPIClientFactory class with get_client(website_id) method",
+        "Clients are cached and reused for same website",
+        "Each client uses website's specific service account",
+        "Lazy initialization of Indexing and Search Console services",
+        "Clear method to invalidate cache (for credential updates)",
+        "Thread-safe client caching",
+        "Unit tests with mocked service account loading"
+      ],
+      "depends_on": [
+        "SEO-023",
+        "SEO-024",
+        "SEO-025"
+      ],
+      "labels": [
+        "api",
+        "google",
+        "factory"
+      ],
+      "implementation_order": 30,
+      "blocked_by": [
+        "SEO-023",
+        "SEO-024",
+        "SEO-025"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-027",
+      "epic_id": "EPIC-005",
+      "title": "[IMPL] API response parsing and error handling",
+      "user_story": "As a system, I want robust error handling so that API failures don't crash the system",
+      "description": "Implement comprehensive error handling for Google API responses with retry logic and structured error types.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "Custom exception classes: GoogleAPIError, QuotaExceededError, AuthenticationError, InvalidURLError",
+        "Parse HTTP errors from googleapiclient.errors.HttpError",
+        "Extract error details from API response body",
+        "Retry decorator with configurable retries for transient errors",
+        "Exponential backoff for rate limit errors",
+        "Logging of all API errors with context",
+        "Unit tests for error scenarios"
+      ],
+      "depends_on": [
+        "SEO-024",
+        "SEO-025"
+      ],
+      "labels": [
+        "api",
+        "google",
+        "error-handling"
+      ],
+      "implementation_order": 31,
+      "blocked_by": [
+        "SEO-024",
+        "SEO-025"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-030",
+      "epic_id": "EPIC-006",
+      "title": "[IMPL] Token bucket rate limiter",
+      "user_story": "As a system, I want token bucket rate limiting so that API requests are distributed evenly",
+      "description": "Implement token bucket algorithm for per-minute rate limiting with configurable rates.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 5,
+      "acceptance_criteria": [
+        "TokenBucket class with configurable rate (tokens/sec) and capacity",
+        "acquire(tokens=1) method that waits if necessary",
+        "try_acquire(tokens=1) method that returns immediately with success/failure",
+        "Thread-safe implementation using asyncio locks",
+        "Configurable per-website and per-API limits",
+        "State can be persisted for crash recovery",
+        "Unit tests for edge cases (bucket empty, concurrent access)"
+      ],
+      "depends_on": [
+        "SEO-029"
+      ],
+      "labels": [
+        "rate-limiting",
+        "token-bucket",
+        "async"
+      ],
+      "implementation_order": 32,
+      "blocked_by": [
+        "SEO-029"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-031",
+      "epic_id": "EPIC-006",
+      "title": "[IMPL] Crash-safe quota state persistence",
+      "user_story": "As a system, I want quota state persisted so that it survives restarts",
+      "description": "Implement persistent storage for rate limiter state that survives application restarts.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "RateLimiterState model: id, website_id, api_type, tokens, last_update, created_at",
+        "State saved after every token consumption",
+        "State loaded on application startup",
+        "Tokens recalculated based on time elapsed since last update",
+        "Atomic updates to prevent race conditions",
+        "Recovery from corrupted state (reset to full bucket)"
+      ],
+      "depends_on": [
+        "SEO-029",
+        "SEO-030"
+      ],
+      "labels": [
+        "rate-limiting",
+        "persistence",
+        "reliability"
+      ],
+      "implementation_order": 33,
+      "blocked_by": [
+        "SEO-029",
+        "SEO-030"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-032",
+      "epic_id": "EPIC-006",
+      "title": "[IMPL] Midnight Pacific timezone quota reset",
+      "user_story": "As a system, I want quotas to reset at midnight Pacific so that I align with Google's quota system",
+      "description": "Implement timezone-aware quota reset logic that resets daily quotas at midnight Pacific Time.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "Use pytz or zoneinfo for Pacific timezone handling",
+        "Calculate next reset time from current time",
+        "Scheduled task to reset quotas at midnight Pacific",
+        "Handles daylight saving time transitions",
+        "Quota records marked with Pacific date for clarity",
+        "API endpoint to manually trigger quota reset (for testing)"
+      ],
+      "depends_on": [
+        "SEO-029"
+      ],
+      "labels": [
+        "quota",
+        "timezone",
+        "scheduling"
+      ],
+      "implementation_order": 34,
+      "blocked_by": [
+        "SEO-029"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-033",
+      "epic_id": "EPIC-006",
+      "title": "[IMPL] Rate limiter integration with API clients",
+      "user_story": "As a system, I want API calls to be rate-limited automatically so that I don't exceed quotas",
+      "description": "Integrate rate limiter with Google API clients so all calls are automatically throttled.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "Rate-limited wrapper for Indexing API calls",
+        "Rate-limited wrapper for URL Inspection API calls",
+        "Calls block until rate limit allows (with timeout)",
+        "Option to fail fast if rate limit exceeded",
+        "Metrics logged for rate limit waits",
+        "Integration tests with mocked time for verification"
+      ],
+      "depends_on": [
+        "SEO-026",
+        "SEO-030",
+        "SEO-031"
+      ],
+      "labels": [
+        "rate-limiting",
+        "integration",
+        "api"
+      ],
+      "implementation_order": 35,
+      "blocked_by": [
+        "SEO-026",
+        "SEO-030",
+        "SEO-031"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-034",
+      "epic_id": "EPIC-007",
+      "title": "[IMPL] Auto priority calculation algorithm",
+      "user_story": "As a system, I want URLs prioritized automatically so that important content is submitted first",
+      "description": "Implement priority calculation based on recency, change status, and sitemap priority hints.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "PriorityService with calculate_priority(url) method",
+        "Factors: lastmod recency (newer = higher), sitemap_priority, changefreq",
+        "Recently modified URLs (last 24h) get priority boost",
+        "Never-submitted URLs get slight priority boost",
+        "Priority range: 0-100 (integer)",
+        "Formula configurable via settings",
+        "Unit tests for various URL scenarios"
+      ],
+      "depends_on": [
+        "SEO-009",
+        "SEO-022"
+      ],
+      "labels": [
+        "queue",
+        "priority",
+        "algorithm"
+      ],
+      "implementation_order": 36,
+      "blocked_by": [
+        "SEO-009",
+        "SEO-022"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-040",
+      "epic_id": "EPIC-008",
+      "title": "[IMPL] Sitemap refresh job",
+      "user_story": "As a system, I want sitemaps refreshed periodically so that new URLs are discovered automatically",
+      "description": "Implement scheduled job that fetches and parses sitemaps for all active websites.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 5,
+      "acceptance_criteria": [
+        "Job runs at configurable interval (default: every 6 hours)",
+        "Processes all active websites with configured sitemaps",
+        "Uses conditional requests (If-None-Match, If-Modified-Since)",
+        "Detects new and changed URLs",
+        "Updates URL priorities based on lastmod changes",
+        "Logs summary: sitemaps fetched, URLs discovered, new count, modified count",
+        "Handles individual website failures without stopping entire job"
+      ],
+      "depends_on": [
+        "SEO-022",
+        "SEO-034",
+        "SEO-039"
+      ],
+      "labels": [
+        "scheduler",
+        "sitemap",
+        "discovery"
+      ],
+      "implementation_order": 37,
+      "blocked_by": [
+        "SEO-022",
+        "SEO-034",
+        "SEO-039"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-041",
+      "epic_id": "EPIC-008",
+      "title": "[IMPL] URL submission job with quota respect",
+      "user_story": "As a system, I want URLs submitted automatically so that Google is notified of content",
+      "description": "Implement scheduled job that submits high-priority URLs to the Indexing API respecting quotas.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 8,
+      "acceptance_criteria": [
+        "Job runs at configurable interval (default: every 5 minutes)",
+        "Selects URLs by priority (highest first) that haven't been submitted recently",
+        "Respects per-website daily quota limits",
+        "Uses rate limiter to avoid per-minute limits",
+        "Supports batch submission for efficiency",
+        "Logs all submissions with response status",
+        "Updates URL submission status in database",
+        "Creates SubmissionLog records for audit trail",
+        "Handles API errors gracefully with retry logic"
+      ],
+      "depends_on": [
+        "SEO-024",
+        "SEO-033",
+        "SEO-034",
+        "SEO-039"
+      ],
+      "labels": [
+        "scheduler",
+        "submission",
+        "indexing-api"
+      ],
+      "implementation_order": 38,
+      "blocked_by": [
+        "SEO-024",
+        "SEO-033",
+        "SEO-034",
+        "SEO-039"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-035",
+      "epic_id": "EPIC-007",
+      "title": "[IMPL] Manual priority override support",
+      "user_story": "As a user, I want to manually override URL priorities so that I can control submission order",
+      "description": "Implement support for manual priority overrides that take precedence over auto-calculated values.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "URL.manual_priority_override field stores manual value (null = auto)",
+        "URL.current_priority reflects override if set, else calculated",
+        "Service method: set_manual_priority(url_id, priority)",
+        "Service method: clear_manual_priority(url_id)",
+        "Override persists until explicitly cleared",
+        "Audit log when override is set/cleared"
+      ],
+      "depends_on": [
+        "SEO-009",
+        "SEO-034"
+      ],
+      "labels": [
+        "queue",
+        "priority",
+        "override"
+      ],
+      "implementation_order": 39,
+      "blocked_by": [
+        "SEO-009",
+        "SEO-034"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-036",
+      "epic_id": "EPIC-007",
+      "title": "[IMPL] Queue filtering and sorting API",
+      "user_story": "As a user, I want to filter and sort the queue so that I can find specific URLs",
+      "description": "Implement API endpoints for querying the URL queue with various filters and sorting options.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "GET /api/queue endpoint with query parameters",
+        "Filters: website_id, priority_range, has_manual_override, index_status, lastmod_range",
+        "Sorting: priority (asc/desc), lastmod, discovered_at",
+        "Pagination: page, page_size with total count",
+        "Include related data: website domain, index status summary",
+        "Efficient queries with proper database indexes",
+        "Response time < 200ms for 10k URLs"
+      ],
+      "depends_on": [
+        "SEO-009",
+        "SEO-010"
+      ],
+      "labels": [
+        "api",
+        "queue",
+        "filtering"
+      ],
+      "implementation_order": 40,
+      "blocked_by": [
+        "SEO-009",
+        "SEO-010"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-042",
+      "epic_id": "EPIC-008",
+      "title": "[IMPL] Index verification job",
+      "user_story": "As a system, I want URLs verified periodically so that I know actual index status",
+      "description": "Implement scheduled job that checks index status via URL Inspection API for recently submitted URLs.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 5,
+      "acceptance_criteria": [
+        "Job runs at configurable interval (default: every hour)",
+        "Selects URLs submitted in last N days without recent verification",
+        "Respects URL Inspection API quota limits",
+        "Updates IndexStatus records with latest API response",
+        "Maps coverage_state to internal status (INDEXED, NOT_INDEXED, etc.)",
+        "Logs verification results and status changes",
+        "Handles API errors with exponential backoff"
+      ],
+      "depends_on": [
+        "SEO-025",
+        "SEO-033",
+        "SEO-039"
+      ],
+      "labels": [
+        "scheduler",
+        "verification",
+        "url-inspection"
+      ],
+      "implementation_order": 41,
+      "blocked_by": [
+        "SEO-025",
+        "SEO-033",
+        "SEO-039"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-043",
+      "epic_id": "EPIC-008",
+      "title": "[IMPL] Job overlap protection",
+      "user_story": "As a system, I want jobs protected from overlapping so that resources aren't exhausted",
+      "description": "Implement mechanism to prevent job instances from running concurrently.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "JobLock service using database or file-based locking",
+        "Jobs check for existing lock before starting",
+        "If locked, job skips this run (logs warning)",
+        "Lock includes job name, start time, and PID",
+        "Lock released on job completion (success or failure)",
+        "Stale lock detection (locks older than timeout are cleared)",
+        "Deadlock prevention with automatic cleanup"
+      ],
+      "depends_on": [
+        "SEO-039"
+      ],
+      "labels": [
+        "scheduler",
+        "locking",
+        "reliability"
+      ],
+      "implementation_order": 42,
+      "blocked_by": [
+        "SEO-039"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-046",
+      "epic_id": "EPIC-009",
+      "title": "[IMPL] Base template with HTMX integration",
+      "user_story": "As a developer, I want a base template with HTMX so that pages can have dynamic updates",
+      "description": "Create base HTML template with HTMX attributes, common styles, and layout structure.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "HTML5 base template with proper DOCTYPE",
+        "HTMX loaded from CDN with integrity check",
+        "htmx.config for sensible defaults (indicator, swap)",
+        "CSS framework included (Tailwind CDN or similar)",
+        "Block structure: title, content, scripts",
+        "Loading indicator component",
+        "Toast/notification area for alerts",
+        "Responsive navigation menu"
+      ],
+      "depends_on": [
+        "SEO-045"
+      ],
+      "labels": [
+        "web-ui",
+        "templates",
+        "htmx"
+      ],
+      "implementation_order": 43,
+      "blocked_by": [
+        "SEO-045"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-048",
+      "epic_id": "EPIC-009",
+      "title": "[IMPL] Website list and detail pages",
+      "user_story": "As a user, I want to view and manage websites so that I can configure the system",
+      "description": "Create pages for listing websites and viewing individual website details.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 5,
+      "acceptance_criteria": [
+        "GET /websites route lists all websites",
+        "Website card shows: domain, URL count, sitemap count, is_active",
+        "GET /websites/{id} shows website detail",
+        "Detail page: service account info (masked), sitemaps list, URL summary",
+        "Add website button (links to form or modal)",
+        "Edit/Delete actions on each website",
+        "HTMX partial updates for actions",
+        "Pagination for large website lists"
+      ],
+      "depends_on": [
+        "SEO-012",
+        "SEO-045",
+        "SEO-046"
+      ],
+      "labels": [
+        "web-ui",
+        "websites",
+        "crud"
+      ],
+      "implementation_order": 44,
+      "blocked_by": [
+        "SEO-012",
+        "SEO-045",
+        "SEO-046"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-049",
+      "epic_id": "EPIC-009",
+      "title": "[IMPL] Website and sitemap forms",
+      "user_story": "As a user, I want forms to add/edit websites so that I can configure the system through the UI",
+      "description": "Create forms for website and sitemap CRUD operations with validation.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 5,
+      "acceptance_criteria": [
+        "Add website form: domain, site_url, is_active",
+        "Add service account form: name, credentials file upload",
+        "Add sitemap form: url, sitemap_type",
+        "All forms have client-side validation (required fields, URL format)",
+        "Server-side validation with error messages displayed",
+        "HTMX form submission with loading indicator",
+        "Success redirects or updates list without page reload",
+        "Delete confirmation modal"
+      ],
+      "depends_on": [
+        "SEO-012",
+        "SEO-013",
+        "SEO-014",
+        "SEO-048"
+      ],
+      "labels": [
+        "web-ui",
+        "forms",
+        "crud"
+      ],
+      "implementation_order": 45,
+      "blocked_by": [
+        "SEO-012",
+        "SEO-013",
+        "SEO-014",
+        "SEO-048"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-050",
+      "epic_id": "EPIC-010",
+      "title": "[IMPL] Queue table with sorting/filtering",
+      "user_story": "As a user, I want to view the URL queue so that I can see what's pending submission",
+      "description": "Create queue page with sortable, filterable table of URLs.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 5,
+      "acceptance_criteria": [
+        "GET /queue route shows URL table",
+        "Columns: URL, website, priority, lastmod, index status, submitted date",
+        "Sort by clicking column headers (HTMX)",
+        "Filter dropdowns: website, index status, priority range",
+        "Search by URL pattern",
+        "Pagination with page size options",
+        "Column visibility toggle",
+        "Export to CSV button"
+      ],
+      "depends_on": [
+        "SEO-036",
+        "SEO-045",
+        "SEO-046"
+      ],
+      "labels": [
+        "web-ui",
+        "queue",
+        "table"
+      ],
+      "implementation_order": 46,
+      "blocked_by": [
+        "SEO-036",
+        "SEO-045",
+        "SEO-046"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-052",
+      "epic_id": "EPIC-010",
+      "title": "[IMPL] Manual submission trigger",
+      "user_story": "As a user, I want to manually trigger submission so that I can expedite indexing",
+      "description": "Create UI for manually triggering URL submission outside of scheduled jobs.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "'Submit Now' button on URL row",
+        "Confirmation dialog before submission",
+        "Single URL submission via API",
+        "Bulk submit button for selected URLs",
+        "Quota check before submission (warning if near limit)",
+        "Real-time status update after submission",
+        "Error handling with retry option"
+      ],
+      "depends_on": [
+        "SEO-024",
+        "SEO-033",
+        "SEO-050"
+      ],
+      "labels": [
+        "web-ui",
+        "queue",
+        "submission"
+      ],
+      "implementation_order": 47,
+      "blocked_by": [
+        "SEO-024",
+        "SEO-033",
+        "SEO-050"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-057",
+      "epic_id": "EPIC-011",
+      "title": "[IMPL] Health check endpoints",
+      "user_story": "As a system, I want health check endpoints so that container orchestration can monitor health",
+      "description": "Implement health check endpoints for application and database connectivity.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "GET /health returns 200 if app is healthy",
+        "Checks database connectivity",
+        "Returns JSON with status components: app, database",
+        "GET /ready returns 200 when app is ready to receive traffic",
+        "Fast response time (< 100ms)",
+        "Used by Docker HEALTHCHECK and docker-compose"
+      ],
+      "depends_on": [
+        "SEO-006",
+        "SEO-045"
+      ],
+      "labels": [
+        "deployment",
+        "health-check",
+        "monitoring"
+      ],
+      "implementation_order": 48,
+      "blocked_by": [
+        "SEO-006",
+        "SEO-045"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-058",
+      "epic_id": "EPIC-011",
+      "title": "[DOC] Environment variable documentation",
+      "user_story": "As a user, I want documentation for environment variables so that I can configure the app correctly",
+      "description": "Create comprehensive documentation for all environment variables with descriptions and defaults.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "docs/configuration.md with all environment variables",
+        "Each variable: name, description, type, default, required/optional",
+        "Example .env file with all options",
+        "Environment-specific recommendations (dev, staging, prod)",
+        "Security notes for sensitive variables",
+        "Linked from README.md"
+      ],
+      "depends_on": [
+        "SEO-002"
+      ],
+      "labels": [
+        "documentation",
+        "configuration",
+        "deployment"
+      ],
+      "implementation_order": 49,
+      "blocked_by": [
+        "SEO-002"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-059",
+      "epic_id": "EPIC-011",
+      "title": "[DOC] README with setup instructions",
+      "user_story": "As a user, I want a README so that I can get started quickly",
+      "description": "Create comprehensive README with quickstart, installation, and usage instructions.",
+      "status": "TODO",
+      "priority": "critical",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "Project overview and features",
+        "Prerequisites (Docker, Python version)",
+        "Quick start with Docker Compose (3-5 commands)",
+        "Manual installation instructions",
+        "Google Cloud setup guide (service account, API enable)",
+        "Configuration overview with link to full docs",
+        "Usage examples for common tasks",
+        "Troubleshooting section"
+      ],
+      "depends_on": [
+        "SEO-055",
+        "SEO-056",
+        "SEO-058"
+      ],
+      "labels": [
+        "documentation",
+        "readme",
+        "deployment"
+      ],
+      "implementation_order": 50,
+      "blocked_by": [
+        "SEO-055",
+        "SEO-056",
+        "SEO-058"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-016",
+      "epic_id": "EPIC-003",
+      "title": "[TEST] Website configuration API tests",
+      "user_story": "As a developer, I want comprehensive API tests so that I can refactor with confidence",
+      "description": "Write pytest tests for all website, service account, and sitemap CRUD endpoints with edge cases.",
+      "status": "TODO",
+      "priority": "medium",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "Tests for all CRUD operations on each resource",
+        "Tests for validation failures (invalid URLs, missing fields)",
+        "Tests for relationship constraints (cascading, orphans)",
+        "Tests for error responses (404, 422, 500)",
+        "Test fixtures for common setup (test website, test service account)",
+        "Tests run against in-memory SQLite database",
+        "Coverage > 90% for configuration API code"
+      ],
+      "depends_on": [
+        "SEO-012",
+        "SEO-013",
+        "SEO-014",
+        "SEO-015"
+      ],
+      "labels": [
+        "testing",
+        "api",
+        "crud"
+      ],
+      "implementation_order": 51,
+      "blocked_by": [
+        "SEO-012",
+        "SEO-013",
+        "SEO-014",
+        "SEO-015"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-028",
+      "epic_id": "EPIC-005",
+      "title": "[TEST] Google API client integration tests",
+      "user_story": "As a developer, I want integration tests for API clients so that I can verify correct API interaction",
+      "description": "Write integration tests with mocked Google API responses for all client methods.",
+      "status": "TODO",
+      "priority": "medium",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "Mock http responses for Indexing API publish endpoint",
+        "Mock http responses for batch endpoint",
+        "Mock http responses for URL Inspection endpoint",
+        "Test successful responses parsing",
+        "Test error response handling (403, 429, 500)",
+        "Test credential loading with valid/invalid files",
+        "Tests run without actual Google API calls"
+      ],
+      "depends_on": [
+        "SEO-024",
+        "SEO-025",
+        "SEO-026",
+        "SEO-027"
+      ],
+      "labels": [
+        "testing",
+        "api",
+        "google"
+      ],
+      "implementation_order": 52,
+      "blocked_by": [
+        "SEO-024",
+        "SEO-025",
+        "SEO-026",
+        "SEO-027"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-037",
+      "epic_id": "EPIC-007",
+      "title": "[IMPL] Bulk priority update operations",
+      "user_story": "As a user, I want to update priorities in bulk so that I can manage large URL sets efficiently",
+      "description": "Implement batch operations for updating multiple URL priorities at once.",
+      "status": "TODO",
+      "priority": "medium",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "POST /api/queue/bulk-update-priority endpoint",
+        "Accept list of {url_id, priority} objects",
+        "Maximum batch size: 1000 URLs per request",
+        "Atomic transaction (all succeed or all fail)",
+        "Return summary: updated_count, failed_count, errors",
+        "POST /api/queue/bulk-clear-overrides endpoint",
+        "Rate-limited to prevent abuse"
+      ],
+      "depends_on": [
+        "SEO-035",
+        "SEO-036"
+      ],
+      "labels": [
+        "api",
+        "queue",
+        "bulk-operations"
+      ],
+      "implementation_order": 53,
+      "blocked_by": [
+        "SEO-035",
+        "SEO-036"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-051",
+      "epic_id": "EPIC-010",
+      "title": "[IMPL] Priority adjustment UI controls",
+      "user_story": "As a user, I want to adjust URL priorities so that I can control submission order",
+      "description": "Create UI controls for adjusting individual and bulk URL priorities.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "Priority slider on each URL row (0-100)",
+        "Immediate save on slider change (HTMX)",
+        "Checkbox selection for bulk operations",
+        "Bulk priority update form",
+        "Clear override button to reset to auto priority",
+        "Visual indicator for manual overrides (icon/badge)",
+        "Success/error toast notifications"
+      ],
+      "depends_on": [
+        "SEO-035",
+        "SEO-037",
+        "SEO-050"
+      ],
+      "labels": [
+        "web-ui",
+        "queue",
+        "priority"
+      ],
+      "implementation_order": 54,
+      "blocked_by": [
+        "SEO-035",
+        "SEO-037",
+        "SEO-050"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-038",
+      "epic_id": "EPIC-007",
+      "title": "[IMPL] Queue statistics and metrics",
+      "user_story": "As a user, I want to see queue statistics so that I understand the overall state of indexing",
+      "description": "Implement aggregation endpoints for queue statistics including counts by status, priority distribution, etc.",
+      "status": "TODO",
+      "priority": "medium",
+      "story_points": 2,
+      "acceptance_criteria": [
+        "GET /api/queue/stats endpoint",
+        "Stats: total URLs, by index status, by website, by priority bucket",
+        "Stats: URLs pending submission, recently submitted, failed",
+        "Stats: average time to index, oldest unindexed URL",
+        "Stats: manual override count and percentage",
+        "Cached response with configurable TTL (default 60s)",
+        "Efficient queries using SQL aggregations"
+      ],
+      "depends_on": [
+        "SEO-036"
+      ],
+      "labels": [
+        "api",
+        "queue",
+        "statistics"
+      ],
+      "implementation_order": 55,
+      "blocked_by": [
+        "SEO-036"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-047",
+      "epic_id": "EPIC-009",
+      "title": "[IMPL] Dashboard page with stats cards",
+      "user_story": "As a user, I want a dashboard overview so that I can see the system status at a glance",
+      "description": "Create main dashboard page with statistics cards, charts, and summary information.",
+      "status": "TODO",
+      "priority": "high",
+      "story_points": 5,
+      "acceptance_criteria": [
+        "GET / route renders dashboard",
+        "Stats cards: total URLs, indexed count, pending count, failed count",
+        "Stats cards: URLs by website",
+        "Recent activity feed (last 10 submissions)",
+        "Quota usage indicators per website",
+        "Job status indicators (last run, next run)",
+        "Auto-refresh using HTMX every 30 seconds",
+        "Mobile responsive layout"
+      ],
+      "depends_on": [
+        "SEO-038",
+        "SEO-045",
+        "SEO-046"
+      ],
+      "labels": [
+        "web-ui",
+        "dashboard",
+        "statistics"
+      ],
+      "implementation_order": 56,
+      "blocked_by": [
+        "SEO-038",
+        "SEO-045",
+        "SEO-046"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-044",
+      "epic_id": "EPIC-008",
+      "title": "[IMPL] Job monitoring and alerting",
+      "user_story": "As a user, I want to be notified of job failures so that I can address issues",
+      "description": "Implement job health monitoring with failure detection and notification hooks.",
+      "status": "TODO",
+      "priority": "medium",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "JobExecution model: id, job_name, started_at, completed_at, status, error_message, records_processed",
+        "Every job execution logged to database",
+        "Detect consecutive failures (configurable threshold)",
+        "API endpoint for job execution history",
+        "Webhook notification support for failures (optional)",
+        "Health check endpoint showing last successful run per job",
+        "Dashboard indicator for job health status"
+      ],
+      "depends_on": [
+        "SEO-039",
+        "SEO-040",
+        "SEO-041",
+        "SEO-042"
+      ],
+      "labels": [
+        "scheduler",
+        "monitoring",
+        "alerting"
+      ],
+      "implementation_order": 57,
+      "blocked_by": [
+        "SEO-039",
+        "SEO-040",
+        "SEO-041",
+        "SEO-042"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-053",
+      "epic_id": "EPIC-010",
+      "title": "[IMPL] Index status refresh button",
+      "user_story": "As a user, I want to manually check index status so that I can verify current state",
+      "description": "Create UI for manually triggering URL inspection for individual URLs.",
+      "status": "TODO",
+      "priority": "medium",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "'Check Status' button on URL row",
+        "Calls URL Inspection API and updates status",
+        "Loading indicator during check",
+        "Displays updated status with timestamp",
+        "Bulk check for selected URLs",
+        "Quota consideration (warning if near limit)",
+        "Error handling for failed checks"
+      ],
+      "depends_on": [
+        "SEO-025",
+        "SEO-033",
+        "SEO-050"
+      ],
+      "labels": [
+        "web-ui",
+        "queue",
+        "verification"
+      ],
+      "implementation_order": 58,
+      "blocked_by": [
+        "SEO-025",
+        "SEO-033",
+        "SEO-050"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-054",
+      "epic_id": "EPIC-010",
+      "title": "[IMPL] Real-time queue updates with SSE or polling",
+      "user_story": "As a user, I want real-time updates so that I see changes without refreshing",
+      "description": "Implement real-time updates for queue changes using Server-Sent Events or HTMX polling.",
+      "status": "TODO",
+      "priority": "medium",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "SSE endpoint for queue updates OR HTMX polling",
+        "Updates pushed when: URL submitted, status changed, priority updated",
+        "Minimal bandwidth usage (only send changes)",
+        "Connection handling for page visibility changes",
+        "Reconnection logic for dropped connections",
+        "Works alongside manual HTMX interactions"
+      ],
+      "depends_on": [
+        "SEO-050",
+        "SEO-051"
+      ],
+      "labels": [
+        "web-ui",
+        "real-time",
+        "sse"
+      ],
+      "implementation_order": 59,
+      "blocked_by": [
+        "SEO-050",
+        "SEO-051"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "SEO-060",
+      "epic_id": "EPIC-011",
+      "title": "[TEST] End-to-end deployment verification",
+      "user_story": "As a developer, I want verified deployment so that I know the system works in production",
+      "description": "Create test script that verifies the complete deployment works correctly.",
+      "status": "TODO",
+      "priority": "medium",
+      "story_points": 3,
+      "acceptance_criteria": [
+        "Shell script or pytest that tests deployment",
+        "Tests: container starts, health check passes, API responds",
+        "Tests: database created, migrations applied",
+        "Tests: can add website, sitemap, discover URLs",
+        "Tests: scheduler jobs run successfully",
+        "CI integration for automated testing",
+        "Documentation for running verification"
+      ],
+      "depends_on": [
+        "SEO-056",
+        "SEO-057"
+      ],
+      "labels": [
+        "testing",
+        "deployment",
+        "e2e"
+      ],
+      "implementation_order": 60,
+      "blocked_by": [
+        "SEO-056",
+        "SEO-057"
+      ],
+      "is_ready": false,
+      "status_changed_at": "2026-02-20T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    }
+  ],
+  "metadata": {
+    "total_stories": 60,
+    "total_story_points": 193,
+    "stories_by_priority": {
+      "critical": 25,
+      "high": 27,
+      "medium": 8,
+      "low": 0
+    },
+    "stories_by_epic": {
+      "EPIC-001": 5,
+      "EPIC-002": 6,
+      "EPIC-003": 5,
+      "EPIC-004": 6,
+      "EPIC-005": 6,
+      "EPIC-006": 5,
+      "EPIC-007": 5,
+      "EPIC-008": 6,
+      "EPIC-009": 5,
+      "EPIC-010": 5,
+      "EPIC-011": 6
+    },
+    "generated_at": "2026-02-20T00:00:00Z",
+    "schema_version": "1.0.0",
+    "blocked_semantics": "A story is considered blocked when status is TODO and is_ready is false. status_counts.BLOCKED is reserved for explicit manual blocking.",
+    "ready_to_start_count": 1,
+    "blocked_count": 59,
+    "status_counts": {
+      "TODO": 60,
+      "IN_PROGRESS": 0,
+      "DONE": 0,
+      "BLOCKED": 0,
+      "CANCELLED": 0
+    }
+  },
+  "work_sessions": [],
+  "session_state": {
+    "last_updated": "2026-02-20T00:00:00Z",
+    "current_story": null,
+    "current_session_id": null,
+    "last_completed_story": null,
+    "last_completed_at": null,
+    "total_completed": 0,
+    "total_in_progress": 0,
+    "total_blocked": 59,
+    "total_ready": 1
+  }
+}

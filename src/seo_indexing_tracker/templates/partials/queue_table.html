@@ -1,0 +1,82 @@
+<section class="panel">
+  {% if feedback %}<p class="feedback">{{ feedback }}</p>{% endif %}
+
+  <form id="batch-form" hx-post="/web/queue/batch" hx-target="#queue-table-region" hx-swap="innerHTML">
+    <input type="hidden" name="page" value="{{ queue_data.page }}" />
+    <input type="hidden" name="page_size" value="{{ filters.page_size }}" />
+    {% if filters.website_id %}<input type="hidden" name="website_id" value="{{ filters.website_id }}" />{% endif %}
+    <input type="hidden" name="queued_only" value="{{ filters.queued_only }}" />
+    <input type="hidden" name="search" value="{{ filters.search }}" />
+
+    <div class="batch-actions">
+      <button type="submit" class="panel-button" name="action" value="enqueue">Batch enqueue</button>
+      <button type="submit" class="panel-button panel-button-ghost" name="action" value="recalculate">Recalculate</button>
+      <button type="submit" class="panel-button panel-button-danger" name="action" value="remove">Batch remove</button>
+    </div>
+  </form>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th>Website</th>
+          <th>URL</th>
+          <th>Priority</th>
+          <th>Override</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in queue_data.items %}
+        <tr>
+          <td><input type="checkbox" name="url_ids" value="{{ item.id }}" form="batch-form" /></td>
+          <td>{{ item.website_domain }}</td>
+          <td class="url-cell">{{ item.url }}</td>
+          <td>{{ "%.2f" | format(item.current_priority) }}</td>
+          <td>{% if item.manual_priority_override is none %}-{% else %}{{ "%.2f" | format(item.manual_priority_override) }}{% endif %}</td>
+          <td>
+            <form class="inline-form" hx-post="/web/queue/priority/{{ item.id }}" hx-target="#queue-table-region" hx-swap="innerHTML">
+              <input type="number" min="0" max="1" step="0.01" name="priority" value="{{ "%.2f" | format(item.current_priority) }}" />
+              <input type="hidden" name="page" value="{{ queue_data.page }}" />
+              <input type="hidden" name="page_size" value="{{ filters.page_size }}" />
+              {% if filters.website_id %}<input type="hidden" name="website_id" value="{{ filters.website_id }}" />{% endif %}
+              <input type="hidden" name="queued_only" value="{{ filters.queued_only }}" />
+              <input type="hidden" name="search" value="{{ filters.search }}" />
+              <button class="panel-button panel-button-small" type="submit">Apply</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6">No queue items match this filter.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination-row">
+    <span>Page {{ queue_data.page }} of {{ queue_data.total_pages }}</span>
+    <div>
+      {% if queue_data.page > 1 %}
+      <button
+        class="panel-button panel-button-small"
+        hx-get="/web/partials/queue-table?page={{ queue_data.page - 1 }}&page_size={{ filters.page_size }}&queued_only={{ filters.queued_only }}&search={{ filters.search }}{% if filters.website_id %}&website_id={{ filters.website_id }}{% endif %}"
+        hx-target="#queue-table-region"
+      >
+        Previous
+      </button>
+      {% endif %}
+      {% if queue_data.page < queue_data.total_pages %}
+      <button
+        class="panel-button panel-button-small"
+        hx-get="/web/partials/queue-table?page={{ queue_data.page + 1 }}&page_size={{ filters.page_size }}&queued_only={{ filters.queued_only }}&search={{ filters.search }}{% if filters.website_id %}&website_id={{ filters.website_id }}{% endif %}"
+        hx-target="#queue-table-region"
+      >
+        Next
+      </button>
+      {% endif %}
+    </div>
+  </div>
+</section>

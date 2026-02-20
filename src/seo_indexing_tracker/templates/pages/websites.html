@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} | SEO Indexing Tracker{% endblock %}
+
+{% block content %}
+<section class="hero-panel">
+  <h1>{{ page_title }}</h1>
+  <p>Create and review website sources feeding the indexing queue.</p>
+</section>
+
+<section class="panel">
+  {% if feedback %}<p class="feedback">{{ feedback }}</p>{% endif %}
+  <form class="filter-grid" action="/ui/websites" method="post">
+    <label>
+      Domain
+      <input type="text" name="domain" required placeholder="example.com" />
+    </label>
+    <label>
+      Site URL
+      <input type="url" name="site_url" required placeholder="https://example.com" />
+    </label>
+    <button type="submit" class="panel-button">Add website</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Registered websites</h2>
+  <ul class="data-list">
+    {% for website in websites %}
+    <li>
+      <strong>{{ website.domain }}</strong>
+      <span>{{ website.site_url }}</span>
+      <span class="pill {% if website.is_active %}pill-ok{% else %}pill-dim{% endif %}">
+        {% if website.is_active %}Active{% else %}Inactive{% endif %}
+      </span>
+    </li>
+    {% else %}
+    <li>No websites configured yet.</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

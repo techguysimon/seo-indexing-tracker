@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} | SEO Indexing Tracker{% endblock %}
+
+{% block content %}
+<section class="hero-panel">
+  <h1>{{ page_title }}</h1>
+  <p>Filter, reprioritize, and batch-manage URLs in the submission queue.</p>
+</section>
+
+<section class="panel">
+  <form
+    class="filter-grid"
+    hx-get="/web/partials/queue-table"
+    hx-target="#queue-table-region"
+    hx-swap="innerHTML"
+  >
+    <label>
+      Website
+      <select name="website_id">
+        <option value="">All websites</option>
+        {% for website in websites %}
+        <option value="{{ website.id }}" {% if filters.website_id == website.id %}selected{% endif %}>
+          {{ website.domain }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      Search URL
+      <input type="search" name="search" value="{{ filters.search }}" placeholder="/blog/" />
+    </label>
+    <label class="checkbox-wrap">
+      <input type="hidden" name="queued_only" value="false" />
+      <input type="checkbox" name="queued_only" value="true" {% if filters.queued_only %}checked{% endif %} />
+      Only queued URLs
+    </label>
+    <input type="hidden" name="page" value="1" />
+    <input type="hidden" name="page_size" value="{{ filters.page_size }}" />
+    <button type="submit" class="panel-button">Apply filters</button>
+  </form>
+</section>
+
+<section id="queue-table-region">
+  {% include "partials/queue_table.html" %}
+</section>
+{% endblock %}

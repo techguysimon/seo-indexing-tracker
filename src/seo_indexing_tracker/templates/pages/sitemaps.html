@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} | SEO Indexing Tracker{% endblock %}
+
+{% block content %}
+<section class="hero-panel">
+  <h1>{{ page_title }}</h1>
+  <p>Associate sitemaps with websites and control which feeds stay active.</p>
+</section>
+
+<section class="panel">
+  <form class="filter-grid" action="/ui/sitemaps" method="get">
+    <label>
+      View website
+      <select name="website_id" onchange="this.form.submit()">
+        {% for website in websites %}
+        <option value="{{ website.id }}" {% if selected_website_id == website.id %}selected{% endif %}>
+          {{ website.domain }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+</section>
+
+<section class="panel">
+  {% if feedback %}<p class="feedback">{{ feedback }}</p>{% endif %}
+  <form class="filter-grid" action="/ui/sitemaps" method="post">
+    <label>
+      Website
+      <select name="website_id" required>
+        {% for website in websites %}
+        <option value="{{ website.id }}" {% if selected_website_id == website.id %}selected{% endif %}>
+          {{ website.domain }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      Sitemap URL
+      <input type="url" name="url" required placeholder="https://example.com/sitemap.xml" />
+    </label>
+    <label>
+      Type
+      <select name="sitemap_type">
+        {% for sitemap_type in sitemap_types %}
+        <option value="{{ sitemap_type }}">{{ sitemap_type }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="panel-button">Add sitemap</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Sitemaps</h2>
+  <ul class="data-list">
+    {% for sitemap in sitemaps %}
+    <li>
+      <strong>{{ sitemap.sitemap_type.value }}</strong>
+      <span>{{ sitemap.url }}</span>
+      <span class="pill {% if sitemap.is_active %}pill-ok{% else %}pill-dim{% endif %}">
+        {% if sitemap.is_active %}Active{% else %}Inactive{% endif %}
+      </span>
+    </li>
+    {% else %}
+    <li>No sitemaps configured for this website.</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

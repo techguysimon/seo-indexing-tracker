@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} | SEO Indexing Tracker{% endblock %}
+
+{% block content %}
+<section class="hero-panel">
+  <h1>{{ page_title }}</h1>
+  <p>Monitor queue pressure, website readiness, and manual overrides in real time.</p>
+</section>
+
+<section
+  id="dashboard-stats"
+  hx-get="/web/partials/dashboard-stats"
+  hx-trigger="load, every 8s"
+  hx-swap="innerHTML"
+>
+  {% include "partials/dashboard_stats.html" %}
+</section>
+
+<section
+  id="queue-status"
+  hx-get="/web/partials/queue-status"
+  hx-trigger="load, every 4s"
+  hx-swap="innerHTML"
+>
+  {% include "partials/queue_status.html" %}
+</section>
+{% endblock %}

@@ -1,0 +1,558 @@
+"""Scheduled processing pipeline jobs for submission, verification, and refresh."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from time import perf_counter
+from typing import Any, Protocol, cast
+from uuid import UUID
+
+from sqlalchemy import func, insert, nullsfirst, select
+
+from seo_indexing_tracker.config import Settings
+from seo_indexing_tracker.database import session_scope
+from seo_indexing_tracker.models import (
+    IndexStatus,
+    IndexVerdict,
+    ServiceAccount,
+    Sitemap,
+    URL,
+    Website,
+)
+from seo_indexing_tracker.services.batch_processor import BatchProcessorService
+from seo_indexing_tracker.services.google_api_factory import (
+    WebsiteGoogleAPIClients,
+    WebsiteServiceAccountConfig,
+)
+from seo_indexing_tracker.services.google_url_inspection_client import (
+    IndexStatusResult,
+    InspectionSystemStatus,
+)
+from seo_indexing_tracker.services.priority_queue import PriorityQueueService
+from seo_indexing_tracker.services.quota_service import QuotaService
+from seo_indexing_tracker.services.rate_limiter import RateLimiterService
+from seo_indexing_tracker.services.scheduler import SchedulerService
+from seo_indexing_tracker.services.url_discovery import URLDiscoveryService
+
+_job_logger = logging.getLogger("seo_indexing_tracker.scheduler.jobs")
+
+_pipeline_service: SchedulerProcessingPipelineService | None = None
+
+URL_SUBMISSION_JOB_ID = "url-submission-job"
+INDEX_VERIFICATION_JOB_ID = "index-verification-job"
+SITEMAP_REFRESH_JOB_ID = "sitemap-refresh-job"
+
+
+@dataclass(slots=True)
+class JobExecutionMetrics:
+    """In-memory runtime metrics for one scheduled job."""
+
+    job_id: str
+    name: str
+    total_runs: int = 0
+    successful_runs: int = 0
+    failed_runs: int = 0
+    overlap_skips: int = 0
+    running: bool = False
+    last_started_at: datetime | None = None
+    last_finished_at: datetime | None = None
+    last_duration_ms: float | None = None
+    last_error: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class _WebsiteCredentials:
+    website_id: UUID
+    credentials_path: str
+
+
+@dataclass(slots=True, frozen=True)
+class _VerificationCandidate:
+    url_id: UUID
+    url: str
+    site_url: str
+
+
+class _InspectionClient(Protocol):
+    async def inspect_url(self, url: str, site_url: str) -> IndexStatusResult: ...
+
+
+class _MappedGoogleClientFactory:
+    """Runtime credentials map used by batch and verification jobs."""
+
+    def __init__(self) -> None:
+        self._credentials_by_website: dict[str, str] = {}
+        self._clients_by_website: dict[str, WebsiteGoogleAPIClients] = {}
+
+    def register_website(self, *, website_id: UUID, credentials_path: str) -> None:
+        website_key = str(website_id)
+        known_credentials_path = self._credentials_by_website.get(website_key)
+        if known_credentials_path == credentials_path:
+            return
+
+        self._credentials_by_website[website_key] = credentials_path
+        self._clients_by_website.pop(website_key, None)
+
+    def get_client(self, website_id: UUID | str) -> WebsiteGoogleAPIClients:
+        website_key = str(website_id)
+        known_client = self._clients_by_website.get(website_key)
+        if known_client is not None:
+            return known_client
+
+        credentials_path = self._credentials_by_website.get(website_key)
+        if credentials_path is None:
+            raise RuntimeError(
+                f"No service account credentials configured for website {website_key}"
+            )
+
+        client_bundle = WebsiteGoogleAPIClients(
+            config=WebsiteServiceAccountConfig(credentials_path=credentials_path)
+        )
+        self._clients_by_website[website_key] = client_bundle
+        return client_bundle
+
+
+class _OverlapProtectedRunner:
+    """Execute jobs with overlap protection and per-job metrics."""
+
+    def __init__(self) -> None:
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._metrics: dict[str, JobExecutionMetrics] = {}
+
+    def register(self, *, job_id: str, name: str) -> None:
+        self._locks.setdefault(job_id, asyncio.Lock())
+        self._metrics.setdefault(job_id, JobExecutionMetrics(job_id=job_id, name=name))
+
+    def snapshot(self) -> list[JobExecutionMetrics]:
+        return [
+            JobExecutionMetrics(
+                job_id=metrics.job_id,
+                name=metrics.name,
+                total_runs=metrics.total_runs,
+                successful_runs=metrics.successful_runs,
+                failed_runs=metrics.failed_runs,
+                overlap_skips=metrics.overlap_skips,
+                running=metrics.running,
+                last_started_at=metrics.last_started_at,
+                last_finished_at=metrics.last_finished_at,
+                last_duration_ms=metrics.last_duration_ms,
+                last_error=metrics.last_error,
+            )
+            for metrics in self._metrics.values()
+        ]
+
+    async def run(
+        self,
+        *,
+        job_id: str,
+        run: Callable[[], Awaitable[dict[str, int]]],
+    ) -> None:
+        lock = self._locks[job_id]
+        metrics = self._metrics[job_id]
+        if lock.locked():
+            metrics.overlap_skips += 1
+            _job_logger.warning(
+                "scheduler_job_overlap_skipped", extra={"job_id": job_id}
+            )
+            return
+
+        async with lock:
+            metrics.total_runs += 1
+            metrics.running = True
+            metrics.last_started_at = datetime.now(UTC)
+            started_at = perf_counter()
+
+            try:
+                job_summary = await run()
+                metrics.successful_runs += 1
+                metrics.last_error = None
+                _job_logger.info(
+                    "scheduler_pipeline_job_completed",
+                    extra={"job_id": job_id, **job_summary},
+                )
+            except Exception as error:
+                metrics.failed_runs += 1
+                metrics.last_error = str(error)
+                _job_logger.exception(
+                    "scheduler_pipeline_job_failed",
+                    extra={"job_id": job_id},
+                )
+            finally:
+                metrics.running = False
+                metrics.last_finished_at = datetime.now(UTC)
+                metrics.last_duration_ms = round(
+                    (perf_counter() - started_at) * 1000, 2
+                )
+
+
+class SchedulerProcessingPipelineService:
+    """Configure and run recurring scheduler jobs for processing pipeline work."""
+
+    def __init__(
+        self,
+        *,
+        scheduler: SchedulerService,
+        settings: Settings,
+        queue_service: PriorityQueueService | None = None,
+        discovery_service: URLDiscoveryService | None = None,
+        rate_limiter: RateLimiterService | None = None,
+        client_factory: _MappedGoogleClientFactory | None = None,
+    ) -> None:
+        self._scheduler = scheduler
+        self._settings = settings
+        self._queue_service = queue_service or PriorityQueueService()
+        self._discovery_service = discovery_service or URLDiscoveryService()
+        self._client_factory = client_factory or _MappedGoogleClientFactory()
+        self._rate_limiter = rate_limiter or RateLimiterService(
+            quota_service=QuotaService(settings=settings)
+        )
+        self._batch_processor = BatchProcessorService(
+            priority_queue=self._queue_service,
+            client_factory=cast(Any, self._client_factory),
+            rate_limiter=self._rate_limiter,
+        )
+        self._runner = _OverlapProtectedRunner()
+
+    def register_jobs(self) -> None:
+        if not self._scheduler.enabled:
+            return
+
+        self._runner.register(job_id=URL_SUBMISSION_JOB_ID, name="URL Submission Job")
+        self._runner.register(
+            job_id=INDEX_VERIFICATION_JOB_ID,
+            name="Index Verification Job",
+        )
+        self._runner.register(job_id=SITEMAP_REFRESH_JOB_ID, name="Sitemap Refresh Job")
+
+        self._scheduler.add_interval_job(
+            job_id=URL_SUBMISSION_JOB_ID,
+            func=run_scheduled_url_submission_job,
+            seconds=self._settings.SCHEDULER_URL_SUBMISSION_INTERVAL_SECONDS,
+            name="Scheduled URL submission",
+        )
+        self._scheduler.add_interval_job(
+            job_id=INDEX_VERIFICATION_JOB_ID,
+            func=run_scheduled_index_verification_job,
+            seconds=self._settings.SCHEDULER_INDEX_VERIFICATION_INTERVAL_SECONDS,
+            name="Scheduled index verification",
+        )
+        self._scheduler.add_interval_job(
+            job_id=SITEMAP_REFRESH_JOB_ID,
+            func=run_scheduled_sitemap_refresh_job,
+            seconds=self._settings.SCHEDULER_SITEMAP_REFRESH_INTERVAL_SECONDS,
+            name="Scheduled sitemap refresh",
+        )
+
+    def monitoring_snapshot(self) -> list[JobExecutionMetrics]:
+        return self._runner.snapshot()
+
+    async def run_url_submission_job(self) -> None:
+        await self._runner.run(job_id=URL_SUBMISSION_JOB_ID, run=self._submit_urls)
+
+    async def run_index_verification_job(self) -> None:
+        await self._runner.run(
+            job_id=INDEX_VERIFICATION_JOB_ID,
+            run=self._verify_index_statuses,
+        )
+
+    async def run_sitemap_refresh_job(self) -> None:
+        await self._runner.run(
+            job_id=SITEMAP_REFRESH_JOB_ID,
+            run=self._refresh_sitemaps,
+        )
+
+    async def _submit_urls(self) -> dict[str, int]:
+        website_credentials = await self._list_websites_with_credentials(
+            requires_queued_urls=True
+        )
+        processed_websites = 0
+        dequeued_urls = 0
+        failed_urls = 0
+
+        for website in website_credentials:
+            self._client_factory.register_website(
+                website_id=website.website_id,
+                credentials_path=website.credentials_path,
+            )
+            result = await self._batch_processor.process_batch(
+                website.website_id,
+                requested_urls=self._settings.SCHEDULER_URL_SUBMISSION_BATCH_SIZE,
+            )
+            processed_websites += 1
+            dequeued_urls += result.dequeued_urls
+            failed_urls += result.submission_failure_count
+
+        return {
+            "processed_websites": processed_websites,
+            "dequeued_urls": dequeued_urls,
+            "failed_urls": failed_urls,
+        }
+
+    async def _verify_index_statuses(self) -> dict[str, int]:
+        website_credentials = await self._list_websites_with_credentials(
+            requires_queued_urls=False
+        )
+        inspected_urls = 0
+        failed_urls = 0
+
+        for website in website_credentials:
+            self._client_factory.register_website(
+                website_id=website.website_id,
+                credentials_path=website.credentials_path,
+            )
+            candidate_urls = await self._pick_urls_for_verification(website.website_id)
+            if not candidate_urls:
+                continue
+
+            inspection_client = self._client_factory.get_client(
+                website.website_id
+            ).search_console
+            inspection_rows: list[dict[str, object]] = []
+            for candidate in candidate_urls:
+                result = await self._inspect_single_url(
+                    website_id=website.website_id,
+                    candidate=candidate,
+                    client=inspection_client,
+                )
+                inspection_rows.append(
+                    self._index_status_row(url_id=candidate.url_id, result=result)
+                )
+                inspected_urls += 1
+                if not result.success:
+                    failed_urls += 1
+
+            async with session_scope() as session:
+                await session.execute(insert(IndexStatus), inspection_rows)
+
+        return {
+            "processed_websites": len(website_credentials),
+            "inspected_urls": inspected_urls,
+            "failed_urls": failed_urls,
+        }
+
+    async def _refresh_sitemaps(self) -> dict[str, int]:
+        sitemap_ids = await self._list_active_sitemap_ids()
+        refreshed_sitemaps = 0
+        discovered_urls = 0
+        requeued_urls = 0
+
+        for sitemap_id in sitemap_ids:
+            discovery_result = await self._discovery_service.discover_urls(sitemap_id)
+            refreshed_sitemaps += 1
+            discovered_urls += (
+                discovery_result.new_count + discovery_result.modified_count
+            )
+
+            sitemap_url_ids = await self._list_sitemap_url_ids(sitemap_id)
+            if not sitemap_url_ids:
+                continue
+
+            requeued_urls += await self._queue_service.enqueue_many(sitemap_url_ids)
+
+        return {
+            "refreshed_sitemaps": refreshed_sitemaps,
+            "discovered_urls": discovered_urls,
+            "requeued_urls": requeued_urls,
+        }
+
+    async def _list_websites_with_credentials(
+        self,
+        *,
+        requires_queued_urls: bool,
+    ) -> list[_WebsiteCredentials]:
+        async with session_scope() as session:
+            statement = (
+                select(Website.id, ServiceAccount.credentials_path)
+                .join(ServiceAccount, ServiceAccount.website_id == Website.id)
+                .where(Website.is_active.is_(True))
+            )
+            if requires_queued_urls:
+                queued_url_count = (
+                    select(func.count(URL.id))
+                    .where(URL.website_id == Website.id, URL.current_priority > 0)
+                    .scalar_subquery()
+                )
+                statement = statement.where(queued_url_count > 0)
+
+            rows = (await session.execute(statement)).all()
+            return [
+                _WebsiteCredentials(website_id=row[0], credentials_path=row[1])
+                for row in rows
+            ]
+
+    async def _pick_urls_for_verification(
+        self,
+        website_id: UUID,
+    ) -> list[_VerificationCandidate]:
+        latest_status = (
+            select(
+                IndexStatus.url_id.label("url_id"),
+                func.max(IndexStatus.checked_at).label("last_checked_at"),
+            )
+            .group_by(IndexStatus.url_id)
+            .subquery()
+        )
+
+        async with session_scope() as session:
+            statement = (
+                select(URL.id, URL.url, Website.site_url)
+                .join(Website, Website.id == URL.website_id)
+                .outerjoin(latest_status, latest_status.c.url_id == URL.id)
+                .where(URL.website_id == website_id)
+                .order_by(
+                    nullsfirst(latest_status.c.last_checked_at),
+                    URL.updated_at.desc(),
+                )
+                .limit(self._settings.SCHEDULER_INDEX_VERIFICATION_BATCH_SIZE)
+            )
+            rows = (await session.execute(statement)).all()
+            return [
+                _VerificationCandidate(url_id=row[0], url=row[1], site_url=row[2])
+                for row in rows
+            ]
+
+    async def _inspect_single_url(
+        self,
+        *,
+        website_id: UUID,
+        candidate: _VerificationCandidate,
+        client: _InspectionClient,
+    ) -> IndexStatusResult:
+        try:
+            permit = await self._rate_limiter.acquire(website_id, api_type="inspection")
+        except Exception as error:
+            return IndexStatusResult(
+                inspection_url=candidate.url,
+                site_url=candidate.site_url,
+                success=False,
+                http_status=None,
+                system_status=InspectionSystemStatus.UNKNOWN,
+                verdict=None,
+                coverage_state=None,
+                last_crawl_time=None,
+                indexing_state=None,
+                robots_txt_state=None,
+                raw_response=None,
+                error_code="RATE_LIMITED",
+                error_message=str(error),
+            )
+
+        try:
+            inspect_url_callable = client.inspect_url
+            return await inspect_url_callable(candidate.url, candidate.site_url)
+        except Exception as error:
+            return IndexStatusResult(
+                inspection_url=candidate.url,
+                site_url=candidate.site_url,
+                success=False,
+                http_status=None,
+                system_status=InspectionSystemStatus.UNKNOWN,
+                verdict=None,
+                coverage_state=None,
+                last_crawl_time=None,
+                indexing_state=None,
+                robots_txt_state=None,
+                raw_response=None,
+                error_code="API_ERROR",
+                error_message=str(error),
+            )
+        finally:
+            permit.release()
+
+    @staticmethod
+    def _index_status_row(
+        *, url_id: UUID, result: IndexStatusResult
+    ) -> dict[str, object]:
+        return {
+            "url_id": url_id,
+            "coverage_state": result.coverage_state or "INSPECTION_FAILED",
+            "verdict": SchedulerProcessingPipelineService._parse_verdict(
+                result.verdict
+            ),
+            "last_crawl_time": result.last_crawl_time,
+            "indexed_at": result.last_crawl_time,
+            "checked_at": datetime.now(UTC),
+            "robots_txt_state": result.robots_txt_state,
+            "indexing_state": result.indexing_state,
+            "page_fetch_state": None,
+            "google_canonical": None,
+            "user_canonical": None,
+            "raw_response": result.raw_response
+            or {
+                "error_code": result.error_code,
+                "error_message": result.error_message,
+            },
+        }
+
+    @staticmethod
+    def _parse_verdict(verdict: str | None) -> IndexVerdict:
+        if verdict is None:
+            return IndexVerdict.NEUTRAL
+
+        normalized_verdict = verdict.strip().upper()
+        if normalized_verdict in {
+            IndexVerdict.PASS.value,
+            IndexVerdict.FAIL.value,
+            IndexVerdict.NEUTRAL.value,
+            IndexVerdict.PARTIAL.value,
+        }:
+            return IndexVerdict(normalized_verdict)
+
+        return IndexVerdict.NEUTRAL
+
+    async def _list_active_sitemap_ids(self) -> list[UUID]:
+        async with session_scope() as session:
+            statement = (
+                select(Sitemap.id)
+                .join(Website, Website.id == Sitemap.website_id)
+                .where(Sitemap.is_active.is_(True), Website.is_active.is_(True))
+            )
+            return list((await session.scalars(statement)).all())
+
+    async def _list_sitemap_url_ids(self, sitemap_id: UUID) -> list[UUID]:
+        async with session_scope() as session:
+            statement = select(URL.id).where(URL.sitemap_id == sitemap_id)
+            return list((await session.scalars(statement)).all())
+
+
+def set_scheduler_processing_pipeline_service(
+    service: SchedulerProcessingPipelineService,
+) -> None:
+    global _pipeline_service
+    _pipeline_service = service
+
+
+def _require_pipeline_service() -> SchedulerProcessingPipelineService:
+    if _pipeline_service is None:
+        raise RuntimeError("Scheduler processing pipeline service is not initialized")
+
+    return _pipeline_service
+
+
+async def run_scheduled_url_submission_job() -> None:
+    await _require_pipeline_service().run_url_submission_job()
+
+
+async def run_scheduled_index_verification_job() -> None:
+    await _require_pipeline_service().run_index_verification_job()
+
+
+async def run_scheduled_sitemap_refresh_job() -> None:
+    await _require_pipeline_service().run_sitemap_refresh_job()
+
+
+__all__ = [
+    "INDEX_VERIFICATION_JOB_ID",
+    "JobExecutionMetrics",
+    "SITEMAP_REFRESH_JOB_ID",
+    "SchedulerProcessingPipelineService",
+    "URL_SUBMISSION_JOB_ID",
+    "run_scheduled_index_verification_job",
+    "run_scheduled_sitemap_refresh_job",
+    "run_scheduled_url_submission_job",
+    "set_scheduler_processing_pipeline_service",
+]
