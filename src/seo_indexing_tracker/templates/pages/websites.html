@@ -28,7 +28,7 @@
   <ul class="data-list">
     {% for website in websites %}
     <li>
-      <strong>{{ website.domain }}</strong>
+      <strong><a href="/ui/websites/{{ website.id }}">{{ website.domain }}</a></strong>
       <span>{{ website.site_url }}</span>
       <span class="pill {% if website.is_active %}pill-ok{% else %}pill-dim{% endif %}">
         {% if website.is_active %}Active{% else %}Inactive{% endif %}

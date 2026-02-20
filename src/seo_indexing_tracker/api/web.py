@@ -2,30 +2,41 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable
+from contextlib import asynccontextmanager
 from math import ceil
 from typing import TypedDict
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from seo_indexing_tracker.database import get_db_session
-from seo_indexing_tracker.models import Sitemap, SitemapType, URL, Website
+from seo_indexing_tracker.models import (
+    ServiceAccount,
+    Sitemap,
+    SitemapType,
+    URL,
+    Website,
+)
 from seo_indexing_tracker.services.config_validation import (
     ConfigurationValidationError,
     ConfigurationValidationService,
 )
+from seo_indexing_tracker.services.priority_queue import PriorityQueueService
+from seo_indexing_tracker.services.url_discovery import URLDiscoveryService
 
 router = APIRouter(tags=["web"])
 
 _config_validation_service = ConfigurationValidationService()
 _DEFAULT_PAGE_SIZE = 12
 _MAX_PAGE_SIZE = 100
+_ALLOWED_SERVICE_ACCOUNT_SCOPES = frozenset({"indexing", "webmasters"})
 
 
 class QueueFilters(TypedDict):
@@ -88,6 +99,40 @@ def _get_templates(request: Request) -> Jinja2Templates:
 
 def _safe_page_size(value: int) -> int:
     return min(max(value, 1), _MAX_PAGE_SIZE)
+
+
+def _is_htmx_request(request: Request) -> bool:
+    return request.headers.get("HX-Request", "").strip().lower() == "true"
+
+
+@asynccontextmanager
+async def _use_existing_session(session: AsyncSession) -> AsyncIterator[AsyncSession]:
+    yield session
+
+
+def _normalize_scopes(scopes: list[str]) -> list[str]:
+    normalized_scopes = [scope.strip().lower() for scope in scopes]
+    invalid_scopes = sorted(
+        {
+            scope
+            for scope in normalized_scopes
+            if scope and scope not in _ALLOWED_SERVICE_ACCOUNT_SCOPES
+        }
+    )
+    if invalid_scopes:
+        invalid_scopes_text = ", ".join(invalid_scopes)
+        raise ConfigurationValidationError(
+            f"Invalid scopes: {invalid_scopes_text}. Allowed scopes: indexing, webmasters"
+        )
+
+    unique_scopes: list[str] = []
+    seen_scopes: set[str] = set()
+    for scope in normalized_scopes:
+        if not scope or scope in seen_scopes:
+            continue
+        unique_scopes.append(scope)
+        seen_scopes.add(scope)
+    return unique_scopes
 
 
 def _query_filters(
@@ -247,6 +292,62 @@ async def _fetch_sitemaps(
         .order_by(Sitemap.created_at.desc())
     )
     return list(result)
+
+
+async def _fetch_website_with_details(
+    *,
+    session: AsyncSession,
+    website_id: UUID,
+) -> Website | None:
+    statement = (
+        select(Website)
+        .where(Website.id == website_id)
+        .options(
+            selectinload(Website.service_account),
+            selectinload(Website.sitemaps),
+        )
+    )
+    website: Website | None = await session.scalar(statement)
+    return website
+
+
+async def _render_website_detail(
+    *,
+    request: Request,
+    session: AsyncSession,
+    website_id: UUID,
+    feedback: str | None,
+) -> Response:
+    templates = _get_templates(request)
+    website = await _fetch_website_with_details(session=session, website_id=website_id)
+    if website is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Website not found",
+        )
+
+    context = {
+        "page_title": f"{website.domain} Setup",
+        "website": website,
+        "service_account": website.service_account,
+        "sitemaps": sorted(
+            website.sitemaps,
+            key=lambda sitemap: sitemap.created_at,
+            reverse=True,
+        ),
+        "sitemap_types": [SitemapType.URLSET.value, SitemapType.INDEX.value],
+        "feedback": feedback,
+    }
+    template_name = (
+        "partials/website_detail_panel.html"
+        if _is_htmx_request(request)
+        else "pages/website_detail.html"
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name=template_name,
+        context=context,
+    )
 
 
 def _table_context(
@@ -530,6 +631,23 @@ async def websites_management(
     )
 
 
+@router.get("/websites/{website_id}", response_class=Response)
+@router.get("/ui/websites/{website_id}", response_class=Response)
+async def website_detail(
+    request: Request,
+    website_id: UUID,
+    feedback: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    """Website detail page with service account and sitemap management."""
+    return await _render_website_detail(
+        request=request,
+        session=session,
+        website_id=website_id,
+        feedback=feedback,
+    )
+
+
 @router.post(
     "/ui/websites", response_class=Response, status_code=status.HTTP_201_CREATED
 )
@@ -563,6 +681,167 @@ async def create_website_from_web(
             "websites": websites,
             "feedback": feedback,
         },
+    )
+
+
+@router.post("/websites/{website_id}/service-account", response_class=Response)
+@router.post("/ui/websites/{website_id}/service-account", response_class=Response)
+async def create_service_account_from_web(
+    request: Request,
+    website_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    """Create service account for a website via web form."""
+    form_data = await request.form()
+    name = str(form_data.get("name") or "").strip()
+    credentials_path = str(form_data.get("credentials_path") or "").strip()
+    scopes = [str(scope) for scope in form_data.getlist("scopes")]
+    feedback = "Service account created"
+
+    website = await session.get(Website, website_id)
+    if website is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Website not found",
+        )
+
+    existing_service_account_id = await session.scalar(
+        select(ServiceAccount.id).where(ServiceAccount.website_id == website_id)
+    )
+    if existing_service_account_id is not None:
+        feedback = "Service account already exists for this website"
+        return await _render_website_detail(
+            request=request,
+            session=session,
+            website_id=website_id,
+            feedback=feedback,
+        )
+
+    try:
+        normalized_scopes = _normalize_scopes(scopes)
+        validated_credentials_path = (
+            await _config_validation_service.validate_service_account(
+                credentials_path=credentials_path,
+                scopes=normalized_scopes,
+            )
+        )
+        service_account = ServiceAccount(
+            website_id=website_id,
+            name=name,
+            credentials_path=validated_credentials_path,
+            scopes=normalized_scopes,
+        )
+        session.add(service_account)
+        await session.flush()
+    except ConfigurationValidationError as error:
+        feedback = str(error)
+    except IntegrityError:
+        feedback = "Service account already exists for this website"
+
+    return await _render_website_detail(
+        request=request,
+        session=session,
+        website_id=website_id,
+        feedback=feedback,
+    )
+
+
+@router.post("/websites/{website_id}/sitemaps", response_class=Response)
+@router.post("/ui/websites/{website_id}/sitemaps", response_class=Response)
+async def create_sitemap_for_website_from_web(
+    request: Request,
+    website_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    """Create sitemap for a website from website detail page."""
+    form_data = await request.form()
+    url = str(form_data.get("url") or "")
+    sitemap_type = str(form_data.get("sitemap_type") or "")
+    feedback = "Sitemap created"
+
+    website = await session.get(Website, website_id)
+    if website is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Website not found",
+        )
+
+    try:
+        await _config_validation_service.validate_sitemap_url(sitemap_url=url)
+        parsed_sitemap_type = SitemapType(sitemap_type.strip().upper())
+        sitemap = Sitemap(
+            website_id=website_id,
+            url=url.strip(),
+            sitemap_type=parsed_sitemap_type,
+            is_active=True,
+        )
+        session.add(sitemap)
+        await session.flush()
+    except ConfigurationValidationError as error:
+        feedback = str(error)
+    except ValueError:
+        feedback = "Invalid sitemap type"
+    except IntegrityError:
+        feedback = "Sitemap already exists for this website"
+
+    return await _render_website_detail(
+        request=request,
+        session=session,
+        website_id=website_id,
+        feedback=feedback,
+    )
+
+
+@router.post("/websites/{website_id}/trigger", response_class=Response)
+@router.post("/ui/websites/{website_id}/trigger", response_class=Response)
+async def trigger_indexing(
+    request: Request,
+    website_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    """Trigger URL discovery and queueing for a website."""
+    website = await session.get(Website, website_id)
+    if website is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Website not found",
+        )
+
+    discovery_service = URLDiscoveryService(
+        session_factory=lambda: _use_existing_session(session)
+    )
+    queue_service = PriorityQueueService(
+        session_factory=lambda: _use_existing_session(session)
+    )
+    sitemap_ids = list(
+        await session.scalars(
+            select(Sitemap.id).where(
+                Sitemap.website_id == website_id,
+                Sitemap.is_active.is_(True),
+            )
+        )
+    )
+
+    discovered_urls = 0
+    for sitemap_id in sitemap_ids:
+        discovery_result = await discovery_service.discover_urls(sitemap_id)
+        discovered_urls += discovery_result.new_count + discovery_result.modified_count
+
+    website_url_ids = list(
+        await session.scalars(select(URL.id).where(URL.website_id == website_id))
+    )
+    queued_urls = await queue_service.enqueue_many(website_url_ids)
+    feedback = (
+        "Indexing triggered: "
+        f"refreshed {len(sitemap_ids)} sitemaps, "
+        f"discovered {discovered_urls} URLs, "
+        f"queued {queued_urls} URLs"
+    )
+    return await _render_website_detail(
+        request=request,
+        session=session,
+        website_id=website_id,
+        feedback=feedback,
     )
 
 

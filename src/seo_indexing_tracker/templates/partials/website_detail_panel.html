@@ -1,0 +1,115 @@
+{% if feedback %}<p class="feedback">{{ feedback }}</p>{% endif %}
+
+<section class="panel">
+  <h2>Website details</h2>
+  <ul class="data-list">
+    <li>
+      <strong>{{ website.domain }}</strong>
+      <span>{{ website.site_url }}</span>
+      <span>Rate limit bucket: {{ website.rate_limit_bucket_size }}</span>
+      <span>Refill rate: {{ "%.2f" | format(website.rate_limit_refill_rate) }}</span>
+      <span>Max concurrent requests: {{ website.rate_limit_max_concurrent_requests }}</span>
+      <span>Queue excess requests: {% if website.rate_limit_queue_excess_requests %}Yes{% else %}No{% endif %}</span>
+    </li>
+  </ul>
+</section>
+
+<section class="panel">
+  <h2>Service account</h2>
+  {% if service_account %}
+  <ul class="data-list">
+    <li>
+      <strong>{{ service_account.name }}</strong>
+      <span>{{ service_account.credentials_path }}</span>
+      <span>Scopes: {{ service_account.scopes | join(", ") }}</span>
+    </li>
+  </ul>
+  {% else %}
+  <p>Not configured yet.</p>
+  <form
+    class="filter-grid"
+    action="/ui/websites/{{ website.id }}/service-account"
+    method="post"
+    hx-post="/ui/websites/{{ website.id }}/service-account"
+    hx-target="#website-detail-region"
+    hx-swap="innerHTML"
+  >
+    <label>
+      Name
+      <input type="text" name="name" required placeholder="Production Service Account" />
+    </label>
+    <label>
+      Credentials path
+      <input
+        type="text"
+        name="credentials_path"
+        required
+        placeholder="/app/service-accounts/website-service-account.json"
+      />
+    </label>
+    <label class="checkbox-wrap">
+      <input type="checkbox" name="scopes" value="indexing" checked />
+      Indexing scope
+    </label>
+    <label class="checkbox-wrap">
+      <input type="checkbox" name="scopes" value="webmasters" checked />
+      Webmasters scope
+    </label>
+    <button type="submit" class="panel-button">Save service account</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Sitemaps</h2>
+  <form
+    class="filter-grid"
+    action="/ui/websites/{{ website.id }}/sitemaps"
+    method="post"
+    hx-post="/ui/websites/{{ website.id }}/sitemaps"
+    hx-target="#website-detail-region"
+    hx-swap="innerHTML"
+  >
+    <label>
+      Sitemap URL
+      <input type="url" name="url" required placeholder="https://example.com/sitemap.xml" />
+    </label>
+    <label>
+      Sitemap type
+      <select name="sitemap_type" required>
+        {% for sitemap_type in sitemap_types %}
+        <option value="{{ sitemap_type }}">{{ sitemap_type }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="panel-button">Add sitemap</button>
+  </form>
+
+  <ul class="data-list">
+    {% for sitemap in sitemaps %}
+    <li>
+      <strong>{{ sitemap.url }}</strong>
+      <span>Type: {{ sitemap.sitemap_type.value }}</span>
+      <span class="pill {% if sitemap.is_active %}pill-ok{% else %}pill-dim{% endif %}">
+        {% if sitemap.is_active %}Active{% else %}Inactive{% endif %}
+      </span>
+    </li>
+    {% else %}
+    <li>No sitemaps configured yet.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="panel">
+  <h2>Trigger indexing</h2>
+  <p>Run sitemap discovery and enqueue all discovered URLs for this website.</p>
+  <form
+    action="/ui/websites/{{ website.id }}/trigger"
+    method="post"
+    hx-post="/ui/websites/{{ website.id }}/trigger"
+    hx-target="#website-detail-region"
+    hx-swap="innerHTML"
+  >
+    <button type="submit" class="panel-button">Trigger indexing</button>
+  </form>
+</section>

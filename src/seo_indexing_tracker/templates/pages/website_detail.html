@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} | SEO Indexing Tracker{% endblock %}
+
+{% block content %}
+<section class="hero-panel">
+  <h1>{{ page_title }}</h1>
+  <p>Configure this website end-to-end before running indexing workflows.</p>
+</section>
+
+<section id="website-detail-region">
+  {% include "partials/website_detail_panel.html" %}
+</section>
+{% endblock %}
