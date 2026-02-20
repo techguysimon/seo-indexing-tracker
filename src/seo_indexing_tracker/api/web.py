@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from math import ceil
 from typing import TypedDict
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -29,7 +30,10 @@ from seo_indexing_tracker.services.config_validation import (
     ConfigurationValidationService,
 )
 from seo_indexing_tracker.services.priority_queue import PriorityQueueService
-from seo_indexing_tracker.services.sitemap_fetcher import SitemapFetchHTTPError
+from seo_indexing_tracker.services.sitemap_fetcher import (
+    SitemapFetchError,
+    SitemapFetchHTTPError,
+)
 from seo_indexing_tracker.services.url_discovery import URLDiscoveryService
 
 router = APIRouter(tags=["web"])
@@ -100,6 +104,17 @@ def _get_templates(request: Request) -> Jinja2Templates:
 
 def _safe_page_size(value: int) -> int:
     return min(max(value, 1), _MAX_PAGE_SIZE)
+
+
+def _safe_sitemap_url_for_feedback(url: str | None) -> str:
+    if not url:
+        return "sitemap"
+
+    split_url = urlsplit(url)
+    host = split_url.netloc.rsplit("@", maxsplit=1)[-1]
+    path = split_url.path or "/"
+    safe_url = f"{host}{path}".strip()
+    return safe_url or "sitemap"
 
 
 def _is_htmx_request(request: Request) -> bool:
@@ -890,12 +905,20 @@ async def trigger_indexing(
             discovered_urls += (
                 discovery_result.new_count + discovery_result.modified_count
             )
-    except SitemapFetchHTTPError as error:
-        feedback = (
-            "Trigger indexing failed: "
-            f"unable to fetch sitemap ({error.url}, HTTP {error.status_code}). "
-            "Verify sitemap access rules and retry."
-        )
+    except SitemapFetchError as error:
+        feedback = "Trigger indexing failed: unable to fetch sitemap."
+        if isinstance(error, SitemapFetchHTTPError):
+            safe_sitemap_url = _safe_sitemap_url_for_feedback(error.url)
+            feedback = (
+                "Trigger indexing failed: "
+                f"unable to fetch sitemap ({safe_sitemap_url}, HTTP {error.status_code}). "
+                "Verify sitemap access rules and retry."
+            )
+        else:
+            feedback = (
+                "Trigger indexing failed: unable to fetch sitemap. "
+                "Verify sitemap access rules and retry."
+            )
         return await _render_website_detail(
             request=request,
             session=session,

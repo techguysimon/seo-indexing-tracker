@@ -30,6 +30,8 @@ async def test_fetch_sitemap_retries_forbidden_with_alternate_browser_headers(
 
     result = await fetch_sitemap(
         "https://example.com/sitemap.xml",
+        etag='"etag-123"',
+        last_modified="Thu, 01 Jan 1970 00:00:00 GMT",
         max_retries=0,
     )
 
@@ -38,5 +40,9 @@ async def test_fetch_sitemap_retries_forbidden_with_alternate_browser_headers(
     assert request_headers[0]["user-agent"] != request_headers[1]["user-agent"]
     assert "accept" in request_headers[0]
     assert "accept-language" in request_headers[0]
+    assert request_headers[0]["if-none-match"] == '"etag-123"'
+    assert request_headers[0]["if-modified-since"] == "Thu, 01 Jan 1970 00:00:00 GMT"
     assert "accept" in request_headers[1]
     assert "accept-language" in request_headers[1]
+    assert request_headers[1]["if-none-match"] == '"etag-123"'
+    assert request_headers[1]["if-modified-since"] == "Thu, 01 Jan 1970 00:00:00 GMT"
