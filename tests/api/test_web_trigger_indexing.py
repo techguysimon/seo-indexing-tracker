@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from datetime import UTC, datetime
+import logging
 import os
 from pathlib import Path
 from uuid import UUID
@@ -37,6 +38,20 @@ from seo_indexing_tracker.services.url_discovery import (
 )
 
 SessionScopeFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
+
+
+@contextmanager
+def capture_trigger_indexing_logs(caplog: pytest.LogCaptureFixture) -> Iterator[None]:
+    trigger_logger = logging.getLogger("seo_indexing_tracker.web.trigger_indexing")
+    original_propagate = trigger_logger.propagate
+    trigger_logger.addHandler(caplog.handler)
+    trigger_logger.propagate = True
+    caplog.set_level(logging.ERROR, logger="seo_indexing_tracker.web.trigger_indexing")
+    try:
+        yield
+    finally:
+        trigger_logger.removeHandler(caplog.handler)
+        trigger_logger.propagate = original_propagate
 
 
 @pytest.mark.asyncio
@@ -243,6 +258,7 @@ async def test_trigger_indexing_handles_timeout_and_network_sitemap_fetch_errors
 async def test_trigger_indexing_handles_sitemap_fetch_http_status_branches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     status_code: int,
     expected_text: str,
 ) -> None:
@@ -309,16 +325,27 @@ async def test_trigger_indexing_handles_sitemap_fetch_http_status_branches(
     app.dependency_overrides[get_db_session] = override_get_db_session
 
     try:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post(f"/ui/websites/{website_id}/trigger")
-            assert response.status_code == 200
-            assert "Trigger indexing failed" in response.text
-            assert expected_text in response.text
-            assert "example.com/sitemap.xml" in response.text
-            assert "user:password@" not in response.text
-            assert "token=super-secret" not in response.text
-            assert "#fragment" not in response.text
+        with capture_trigger_indexing_logs(caplog):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                response = await client.post(f"/ui/websites/{website_id}/trigger")
+                assert response.status_code == 200
+                assert "Trigger indexing failed" in response.text
+                assert expected_text in response.text
+                assert "example.com/sitemap.xml" in response.text
+                assert "user:password@" not in response.text
+                assert "token=super-secret" not in response.text
+                assert "#fragment" not in response.text
+
+            logged_text = "\n".join(caplog.messages)
+            assert "example.com/sitemap.xml" in logged_text
+            assert "'stage': 'fetch'" in logged_text
+            assert "'sitemap_url_sanitized': 'example.com/sitemap.xml'" in logged_text
+            assert "user:password@" not in logged_text
+            assert "token=super-secret" not in logged_text
+            assert "#fragment" not in logged_text
     finally:
         await engine.dispose()
 
@@ -327,6 +354,7 @@ async def test_trigger_indexing_handles_sitemap_fetch_http_status_branches(
 async def test_trigger_indexing_handles_discovery_stage_failures_with_friendly_feedback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     database_url = (
         f"sqlite+aiosqlite:///{tmp_path / 'web-trigger-discovery-stage.sqlite'}"
@@ -392,13 +420,23 @@ async def test_trigger_indexing_handles_discovery_stage_failures_with_friendly_f
     app.dependency_overrides[get_db_session] = override_get_db_session
 
     try:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post(f"/ui/websites/{website_id}/trigger")
-            assert response.status_code == 200
-            assert "Trigger indexing failed" in response.text
-            assert "sitemap discovery failed" in response.text
-            assert "Internal Server Error" not in response.text
+        with capture_trigger_indexing_logs(caplog):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                response = await client.post(f"/ui/websites/{website_id}/trigger")
+                assert response.status_code == 200
+                assert "Trigger indexing failed" in response.text
+                assert "sitemap discovery failed" in response.text
+                assert "Internal Server Error" not in response.text
+
+            logged_text = "\n".join(caplog.messages)
+            assert "'stage': 'discovery'" in logged_text
+            assert "'sitemap_url_sanitized': 'example.com/sitemap.xml'" in logged_text
+            assert "user:password@" not in logged_text
+            assert "token=super-secret" not in logged_text
+            assert "#fragment" not in logged_text
     finally:
         await engine.dispose()
 
@@ -407,6 +445,7 @@ async def test_trigger_indexing_handles_discovery_stage_failures_with_friendly_f
 async def test_trigger_indexing_enqueue_failure_rolls_back_discovered_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     database_url = (
         f"sqlite+aiosqlite:///{tmp_path / 'web-trigger-enqueue-rollback.sqlite'}"
@@ -496,12 +535,22 @@ async def test_trigger_indexing_enqueue_failure_rolls_back_discovered_changes(
     app.dependency_overrides[get_db_session] = override_get_db_session
 
     try:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post(f"/ui/websites/{website_id}/trigger")
-            assert response.status_code == 200
-            assert "Trigger indexing failed" in response.text
-            assert "could not be queued" in response.text
+        with capture_trigger_indexing_logs(caplog):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                response = await client.post(f"/ui/websites/{website_id}/trigger")
+                assert response.status_code == 200
+                assert "Trigger indexing failed" in response.text
+                assert "could not be queued" in response.text
+
+            logged_text = "\n".join(caplog.messages)
+            assert "'stage': 'enqueue'" in logged_text
+            assert "'sitemap_url_sanitized': None" in logged_text
+            assert "user:password@" not in logged_text
+            assert "token=super-secret" not in logged_text
+            assert "#fragment" not in logged_text
 
         async with scoped_session() as session:
             persisted_urls = await session.scalars(
