@@ -2,23 +2,31 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 import logging
 from typing import Any, cast
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 from uuid import UUID
 
+from lxml import etree  # type: ignore[import-untyped]
 from sqlalchemy import bindparam, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from seo_indexing_tracker.models.sitemap import Sitemap
+from seo_indexing_tracker.models.sitemap import Sitemap, SitemapType
 from seo_indexing_tracker.models.url import URL
 from seo_indexing_tracker.services.sitemap_fetcher import (
     SitemapFetchError,
+    SitemapFetchResult,
     fetch_sitemap,
+)
+from seo_indexing_tracker.services.sitemap_index_parser import DEFAULT_MAX_DEPTH
+from seo_indexing_tracker.services.sitemap_type_detector import (
+    SitemapTypeDetectionError,
+    detect_sitemap_type,
 )
 from seo_indexing_tracker.services.sitemap_url_parser import (
     SitemapURLXMLParseError,
@@ -26,6 +34,7 @@ from seo_indexing_tracker.services.sitemap_url_parser import (
 )
 
 DEFAULT_BATCH_SIZE = 500
+DEFAULT_INDEX_CHILD_MAX_COUNT = 500
 
 SessionScopeFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
@@ -40,6 +49,15 @@ class URLDiscoveryResult:
     new_count: int
     modified_count: int
     unchanged_count: int
+
+
+@dataclass(slots=True, frozen=True)
+class _SitemapDocument:
+    url: str
+    depth: int
+    content: bytes
+    status_code: int
+    content_type: str | None
 
 
 class URLDiscoveryProcessingError(Exception):
@@ -102,6 +120,80 @@ def _parse_lastmod(lastmod: str | None) -> datetime | None:
     return parsed_datetime.astimezone(UTC)
 
 
+def _canonicalize_url(url: str) -> str:
+    normalized_url = url.strip()
+    split_url = urlsplit(normalized_url)
+    canonical_parts = SplitResult(
+        scheme=split_url.scheme.lower(),
+        netloc=split_url.netloc.lower(),
+        path=split_url.path,
+        query=split_url.query,
+        fragment="",
+    )
+    return urlunsplit(canonical_parts)
+
+
+def _normalize_tag_name(tag_name: str) -> str:
+    if tag_name.startswith("{"):
+        _, _, local_name = tag_name.partition("}")
+        return local_name.lower()
+
+    _, _, local_name = tag_name.rpartition(":")
+    if local_name:
+        return local_name.lower()
+
+    return tag_name.lower()
+
+
+def _extract_child_text(parent: etree._Element, tag_name: str) -> str | None:
+    for child in parent:
+        if not isinstance(child.tag, str):
+            continue
+
+        if _normalize_tag_name(child.tag) != tag_name:
+            continue
+
+        if child.text is None or not isinstance(child.text, str):
+            return None
+
+        value = cast(str, child.text).strip()
+        if not value:
+            return None
+
+        return value
+
+    return None
+
+
+def _parse_sitemap_index_child_urls(
+    xml_content: bytes, *, source_url: str
+) -> list[str]:
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=False)
+
+    try:
+        root = etree.fromstring(xml_content, parser=parser)
+    except etree.XMLSyntaxError as exc:
+        raise SitemapURLXMLParseError(
+            f"Invalid sitemap index XML at {source_url!r}: {exc}"
+        ) from exc
+
+    child_urls: list[str] = []
+    for child in root:
+        if not isinstance(child.tag, str):
+            continue
+
+        if _normalize_tag_name(child.tag) != "sitemap":
+            continue
+
+        loc = _extract_child_text(child, "loc")
+        if not loc:
+            continue
+
+        child_urls.append(loc)
+
+    return child_urls
+
+
 def _normalize_datetime(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -120,9 +212,17 @@ class URLDiscoveryService:
         *,
         session_factory: SessionScopeFactory | None = None,
         batch_size: int = DEFAULT_BATCH_SIZE,
+        index_max_depth: int = DEFAULT_MAX_DEPTH,
+        index_child_max_count: int = DEFAULT_INDEX_CHILD_MAX_COUNT,
     ) -> None:
         if batch_size <= 0:
             raise ValueError("batch_size must be greater than zero")
+
+        if index_max_depth < 0:
+            raise ValueError("index_max_depth must be zero or greater")
+
+        if index_child_max_count <= 0:
+            raise ValueError("index_child_max_count must be greater than zero")
 
         if session_factory is None:
             from seo_indexing_tracker.database import session_scope
@@ -131,6 +231,148 @@ class URLDiscoveryService:
 
         self._session_factory = session_factory
         self._batch_size = batch_size
+        self._index_max_depth = index_max_depth
+        self._index_child_max_count = index_child_max_count
+
+    async def _discover_records_by_url(
+        self,
+        *,
+        root_sitemap: Sitemap,
+        root_fetch_result: SitemapFetchResult,
+    ) -> dict[str, tuple[datetime | None, str | None, float | None]]:
+        if root_fetch_result.content is None:
+            raise RuntimeError("Sitemap response content was empty")
+
+        records_by_url: dict[str, tuple[datetime | None, str | None, float | None]] = {}
+        queue: deque[_SitemapDocument] = deque(
+            [
+                _SitemapDocument(
+                    url=root_sitemap.url,
+                    depth=0,
+                    content=root_fetch_result.content,
+                    status_code=root_fetch_result.status_code,
+                    content_type=root_fetch_result.content_type,
+                )
+            ]
+        )
+        discovered_child_sitemap_count = 0
+        seen_sitemap_urls: set[str] = {_canonicalize_url(root_sitemap.url)}
+
+        while queue:
+            sitemap_document = queue.popleft()
+
+            try:
+                sitemap_type = detect_sitemap_type(sitemap_document.content)
+            except SitemapTypeDetectionError as exc:
+                raise URLDiscoveryProcessingError(
+                    stage="parse",
+                    website_id=root_sitemap.website_id,
+                    sitemap_id=root_sitemap.id,
+                    sitemap_url=sitemap_document.url,
+                    status_code=sitemap_document.status_code,
+                    content_type=sitemap_document.content_type,
+                ) from exc
+
+            if sitemap_type is SitemapType.URLSET:
+                try:
+                    for record in parse_sitemap_urls_stream(sitemap_document.content):
+                        records_by_url[record.url] = (
+                            _parse_lastmod(record.lastmod),
+                            record.changefreq,
+                            record.priority,
+                        )
+                except SitemapURLXMLParseError as exc:
+                    raise URLDiscoveryProcessingError(
+                        stage="parse",
+                        website_id=root_sitemap.website_id,
+                        sitemap_id=root_sitemap.id,
+                        sitemap_url=sitemap_document.url,
+                        status_code=sitemap_document.status_code,
+                        content_type=sitemap_document.content_type,
+                    ) from exc
+
+                continue
+
+            try:
+                child_sitemap_urls = _parse_sitemap_index_child_urls(
+                    sitemap_document.content,
+                    source_url=sitemap_document.url,
+                )
+            except SitemapURLXMLParseError as exc:
+                raise URLDiscoveryProcessingError(
+                    stage="parse",
+                    website_id=root_sitemap.website_id,
+                    sitemap_id=root_sitemap.id,
+                    sitemap_url=sitemap_document.url,
+                    status_code=sitemap_document.status_code,
+                    content_type=sitemap_document.content_type,
+                ) from exc
+
+            next_depth = sitemap_document.depth + 1
+            if child_sitemap_urls and next_depth > self._index_max_depth:
+                raise URLDiscoveryProcessingError(
+                    stage="index_depth_limit",
+                    website_id=root_sitemap.website_id,
+                    sitemap_id=root_sitemap.id,
+                    sitemap_url=sitemap_document.url,
+                    status_code=sitemap_document.status_code,
+                    content_type=sitemap_document.content_type,
+                )
+
+            for child_sitemap_url in child_sitemap_urls:
+                canonical_child_sitemap_url = _canonicalize_url(child_sitemap_url)
+                if canonical_child_sitemap_url in seen_sitemap_urls:
+                    continue
+
+                seen_sitemap_urls.add(canonical_child_sitemap_url)
+                discovered_child_sitemap_count += 1
+                if discovered_child_sitemap_count > self._index_child_max_count:
+                    raise URLDiscoveryProcessingError(
+                        stage="index_child_limit",
+                        website_id=root_sitemap.website_id,
+                        sitemap_id=root_sitemap.id,
+                        sitemap_url=sitemap_document.url,
+                        status_code=sitemap_document.status_code,
+                        content_type=sitemap_document.content_type,
+                    )
+
+                try:
+                    child_fetch_result = await fetch_sitemap(child_sitemap_url)
+                except SitemapFetchError:
+                    logger.warning(
+                        {
+                            "event": "url_discovery_failed",
+                            "website_id": str(root_sitemap.website_id),
+                            "sitemap_id": str(root_sitemap.id),
+                            "sitemap_url_sanitized": _sanitize_sitemap_url(
+                                child_sitemap_url
+                            ),
+                            "stage": "fetch_child",
+                        }
+                    )
+                    raise
+
+                if child_fetch_result.content is None:
+                    raise URLDiscoveryProcessingError(
+                        stage="fetch_child_content",
+                        website_id=root_sitemap.website_id,
+                        sitemap_id=root_sitemap.id,
+                        sitemap_url=child_fetch_result.url,
+                        status_code=child_fetch_result.status_code,
+                        content_type=child_fetch_result.content_type,
+                    )
+
+                queue.append(
+                    _SitemapDocument(
+                        url=child_fetch_result.url,
+                        depth=next_depth,
+                        content=child_fetch_result.content,
+                        status_code=child_fetch_result.status_code,
+                        content_type=child_fetch_result.content_type,
+                    )
+                )
+
+        return records_by_url
 
     async def discover_urls(self, sitemap_id: UUID) -> URLDiscoveryResult:
         """Fetch a sitemap, compare URL lastmod values, and persist changes."""
@@ -175,40 +417,25 @@ class URLDiscoveryService:
                     unchanged_count=0,
                 )
 
-            if fetch_result.content is None:
-                raise RuntimeError("Sitemap response content was empty")
-
-            records_by_url: dict[
-                str, tuple[datetime | None, str | None, float | None]
-            ] = {}
             try:
-                for record in parse_sitemap_urls_stream(fetch_result.content):
-                    records_by_url[record.url] = (
-                        _parse_lastmod(record.lastmod),
-                        record.changefreq,
-                        record.priority,
-                    )
-            except SitemapURLXMLParseError as exc:
+                records_by_url = await self._discover_records_by_url(
+                    root_sitemap=sitemap,
+                    root_fetch_result=fetch_result,
+                )
+            except URLDiscoveryProcessingError as exc:
                 logger.warning(
                     {
                         "event": "url_discovery_failed",
                         "website_id": str(sitemap.website_id),
                         "sitemap_id": str(sitemap.id),
-                        "sitemap_url_sanitized": _sanitize_sitemap_url(sitemap.url),
-                        "stage": "parse",
+                        "sitemap_url_sanitized": _sanitize_sitemap_url(exc.sitemap_url),
+                        "stage": exc.stage,
                         "exception_class": exc.__class__.__name__,
-                        "http_status": fetch_result.status_code,
-                        "content_type": fetch_result.content_type,
+                        "http_status": exc.status_code,
+                        "content_type": exc.content_type,
                     }
                 )
-                raise URLDiscoveryProcessingError(
-                    stage="parse",
-                    website_id=sitemap.website_id,
-                    sitemap_id=sitemap.id,
-                    sitemap_url=sitemap.url,
-                    status_code=fetch_result.status_code,
-                    content_type=fetch_result.content_type,
-                ) from exc
+                raise
 
             if not records_by_url:
                 return URLDiscoveryResult(

@@ -1013,12 +1013,13 @@ async def trigger_indexing(
                 feedback=feedback,
             )
         except URLDiscoveryProcessingError as error:
+            safe_error_url = _safe_sitemap_url_for_feedback(error.sitemap_url)
             _trigger_logger.error(
                 {
                     "event": "trigger_indexing_failed",
                     "website_id": str(website_id),
                     "sitemap_id": str(sitemap_id),
-                    "sitemap_url_sanitized": safe_sitemap_url,
+                    "sitemap_url_sanitized": safe_error_url,
                     "stage": error.stage,
                     "exception_class": error.__class__.__name__,
                     "http_status": error.status_code,
@@ -1027,7 +1028,7 @@ async def trigger_indexing(
             )
             feedback = _trigger_feedback_for_discovery_error(
                 error=error,
-                safe_sitemap_url=safe_sitemap_url,
+                safe_sitemap_url=safe_error_url,
             )
             return await _rollback_and_render_website_detail(
                 request=request,

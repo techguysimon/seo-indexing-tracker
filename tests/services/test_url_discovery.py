@@ -8,11 +8,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from seo_indexing_tracker.models import Base, Sitemap, SitemapType, URL, Website
-from seo_indexing_tracker.services.sitemap_fetcher import SitemapFetchResult
+from seo_indexing_tracker.services.sitemap_fetcher import (
+    SitemapFetchNetworkError,
+    SitemapFetchResult,
+)
 from seo_indexing_tracker.services.url_discovery import URLDiscoveryService
 
 
@@ -252,5 +255,285 @@ async def test_discover_urls_updates_sitemap_metadata_when_not_modified(
         assert persisted_sitemap.last_fetched is not None
         assert persisted_sitemap.etag == "etag-304"
         assert persisted_sitemap.last_modified_header == "Fri, 20 Feb 2026 13:00:00 GMT"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_discover_urls_expands_index_sitemap_children(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'index-discovery.sqlite'}"
+    engine = create_async_engine(database_url)
+    session_factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    @asynccontextmanager
+    async def scoped_session() -> AsyncIterator[AsyncSession]:
+        session = session_factory()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with scoped_session() as session:
+        website = Website(domain="example.com", site_url="https://example.com")
+        session.add(website)
+        await session.flush()
+
+        sitemap = Sitemap(
+            website_id=website.id,
+            url="https://example.com/sitemap-index.xml",
+            sitemap_type=SitemapType.INDEX,
+        )
+        session.add(sitemap)
+        await session.flush()
+        sitemap_id = sitemap.id
+
+    async def fake_fetch_sitemap(url: str, **__: str | None) -> SitemapFetchResult:
+        payloads = {
+            "https://example.com/sitemap-index.xml": """
+            <sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+              <sitemap><loc>https://example.com/news-sitemap.xml</loc></sitemap>
+              <sitemap><loc>https://example.com/pages-sitemap.xml</loc></sitemap>
+            </sitemapindex>
+            """,
+            "https://example.com/news-sitemap.xml": """
+            <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+              <url><loc>https://example.com/news/a</loc></url>
+              <url><loc>https://example.com/news/b</loc></url>
+            </urlset>
+            """,
+            "https://example.com/pages-sitemap.xml": """
+            <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+              <url><loc>https://example.com/about</loc></url>
+            </urlset>
+            """,
+        }
+        return _fetch_result(
+            content=payloads[url],
+            etag=None,
+            last_modified=None,
+            not_modified=False,
+        )
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.url_discovery.fetch_sitemap",
+        fake_fetch_sitemap,
+    )
+
+    result = await URLDiscoveryService(session_factory=scoped_session).discover_urls(
+        sitemap_id
+    )
+
+    assert result.total_discovered == 3
+    assert result.new_count == 3
+    assert result.modified_count == 0
+    assert result.unchanged_count == 0
+
+    async with scoped_session() as session:
+        persisted_urls = (
+            (await session.execute(select(URL.url).order_by(URL.url.asc())))
+            .scalars()
+            .all()
+        )
+
+    assert persisted_urls == [
+        "https://example.com/about",
+        "https://example.com/news/a",
+        "https://example.com/news/b",
+    ]
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_discover_urls_deduplicates_duplicate_child_sitemaps(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'index-dedup.sqlite'}"
+    engine = create_async_engine(database_url)
+    session_factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    @asynccontextmanager
+    async def scoped_session() -> AsyncIterator[AsyncSession]:
+        session = session_factory()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with scoped_session() as session:
+        website = Website(domain="example.com", site_url="https://example.com")
+        session.add(website)
+        await session.flush()
+
+        sitemap = Sitemap(
+            website_id=website.id,
+            url="https://example.com/sitemap-index.xml",
+            sitemap_type=SitemapType.INDEX,
+        )
+        session.add(sitemap)
+        await session.flush()
+        sitemap_id = sitemap.id
+
+    fetch_calls: list[str] = []
+
+    async def fake_fetch_sitemap(url: str, **__: str | None) -> SitemapFetchResult:
+        fetch_calls.append(url)
+        payloads = {
+            "https://example.com/sitemap-index.xml": """
+            <sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+              <sitemap><loc>https://example.com/shared-sitemap.xml</loc></sitemap>
+              <sitemap><loc>https://example.com/shared-sitemap.xml</loc></sitemap>
+            </sitemapindex>
+            """,
+            "https://example.com/shared-sitemap.xml": """
+            <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+              <url><loc>https://example.com/only-once</loc></url>
+            </urlset>
+            """,
+        }
+        return _fetch_result(
+            content=payloads[url],
+            etag=None,
+            last_modified=None,
+            not_modified=False,
+        )
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.url_discovery.fetch_sitemap",
+        fake_fetch_sitemap,
+    )
+
+    result = await URLDiscoveryService(session_factory=scoped_session).discover_urls(
+        sitemap_id
+    )
+
+    assert result.total_discovered == 1
+    assert fetch_calls.count("https://example.com/shared-sitemap.xml") == 1
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_discover_urls_fails_fast_when_child_sitemap_fetch_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'index-fetch-failure.sqlite'}"
+    engine = create_async_engine(database_url)
+    session_factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    @asynccontextmanager
+    async def scoped_session() -> AsyncIterator[AsyncSession]:
+        session = session_factory()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with scoped_session() as session:
+        website = Website(domain="example.com", site_url="https://example.com")
+        session.add(website)
+        await session.flush()
+
+        sitemap = Sitemap(
+            website_id=website.id,
+            url="https://example.com/sitemap-index.xml",
+            sitemap_type=SitemapType.INDEX,
+        )
+        session.add(sitemap)
+        await session.flush()
+        sitemap_id = sitemap.id
+
+    async def fake_fetch_sitemap(url: str, **__: str | None) -> SitemapFetchResult:
+        if url == "https://example.com/sitemap-index.xml":
+            return _fetch_result(
+                content="""
+                <sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+                  <sitemap><loc>https://example.com/failing-child.xml</loc></sitemap>
+                  <sitemap><loc>https://example.com/success-child.xml</loc></sitemap>
+                </sitemapindex>
+                """,
+                etag=None,
+                last_modified=None,
+                not_modified=False,
+            )
+
+        if url == "https://example.com/failing-child.xml":
+            raise SitemapFetchNetworkError("child sitemap network failure")
+
+        return _fetch_result(
+            content="""
+            <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+              <url><loc>https://example.com/should-not-be-processed</loc></url>
+            </urlset>
+            """,
+            etag=None,
+            last_modified=None,
+            not_modified=False,
+        )
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.url_discovery.fetch_sitemap",
+        fake_fetch_sitemap,
+    )
+
+    with pytest.raises(SitemapFetchNetworkError):
+        await URLDiscoveryService(session_factory=scoped_session).discover_urls(
+            sitemap_id
+        )
+
+    async with scoped_session() as session:
+        persisted_url_count = int(
+            (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(URL)
+                    .where(URL.website_id == website.id)
+                )
+            )
+            or 0
+        )
+
+    assert persisted_url_count == 0
 
     await engine.dispose()
