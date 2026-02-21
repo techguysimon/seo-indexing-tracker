@@ -134,6 +134,22 @@ uv run mypy src tests
 2. Register job in `SchedulerProcessingPipelineService.register_jobs()`
 3. Job automatically gets overlap protection and metrics tracking
 
+### Updating the UI Setup Flow
+
+The full setup flow is centered on the website detail page:
+
+1. `src/seo_indexing_tracker/templates/pages/websites.html` - website list/create and link into detail view
+2. `src/seo_indexing_tracker/templates/pages/website_detail.html` - detail shell
+3. `src/seo_indexing_tracker/templates/partials/website_detail_panel.html` - service account, sitemap CRUD, trigger indexing UI
+4. `src/seo_indexing_tracker/api/web.py` - `/ui/websites/{id}` setup actions and trigger indexing handlers
+
+Queue page rendering relies on:
+
+- `src/seo_indexing_tracker/templates/pages/queue.html`
+- `src/seo_indexing_tracker/templates/partials/queue_table.html`
+
+Keep page/partial context keys aligned when changing queue filters, pagination, or batch actions.
+
 ### Database Migrations
 
 The project uses SQLAlchemy's `Base.metadata.create_all()` for schema creation. For new models:
@@ -153,10 +169,13 @@ All settings are defined in `src/seo_indexing_tracker/config.py` and loaded from
 | `HOST` | Server host | `0.0.0.0` |
 | `PORT` | Server port | `8000` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
+| `OUTBOUND_HTTP_USER_AGENT` | User-Agent used for outbound sitemap/config validation HTTP requests | `BlueBeastBuildAgent` |
 | `SCHEDULER_ENABLED` | Enable scheduler jobs | `true` |
 | `SCHEDULER_URL_SUBMISSION_INTERVAL_SECONDS` | URL submission frequency | `300` |
 | `SCHEDULER_INDEX_VERIFICATION_INTERVAL_SECONDS` | Verification frequency | `900` |
 | `SCHEDULER_SITEMAP_REFRESH_INTERVAL_SECONDS` | Sitemap refresh frequency | `3600` |
+
+`python-multipart` is required for form parsing in web UI routes (`request.form()`). It is installed via project dependencies.
 
 ## Architectural Patterns
 
@@ -186,12 +205,31 @@ Per-website rate limiting is enforced via `RateLimiterService` using semaphores.
 
 URLs are processed based on priority (manual override or auto-calculated from `lastmod` age). Higher priority URLs are dequeued first.
 
+### Sitemap Fetching and Child Traversal Constraints
+
+Treat sitemap fetch policy as security-sensitive code:
+
+- Use configured outbound UA (`OUTBOUND_HTTP_USER_AGENT`) for sitemap/config validation calls.
+- Preserve hardened gzip/content-encoding handling and 403 retry behavior in `services/sitemap_fetcher.py`.
+- Preserve strict child sitemap SSRF protections in `services/url_discovery.py`:
+  - child URL policy validation
+  - explicit redirect handling with per-hop validation
+  - pinned connect IPs with validated fallback IP retries
+  - fail-closed behavior if connect destination metadata is unavailable
+- Keep trigger diagnostics stage-based and URL-sanitized in `api/web.py` (`sitemap_url_sanitized`).
+
 ## Testing Guidelines
 
 - Tests go in `tests/` directory mirroring `src/` structure
 - Use `pytest-asyncio` for async tests
 - Use fixtures from `conftest.py` for common test setup
 - Mark async tests with `@pytest.mark.asyncio`
+
+For setup-flow/sitemap-security changes, run focused tests before full suite:
+
+- `uv run pytest tests/api/test_web_app_setup.py tests/api/test_web_trigger_indexing.py`
+- `uv run pytest tests/services/test_sitemap_fetcher.py tests/services/test_url_discovery.py tests/services/test_config_validation.py`
+- `uv run pytest tests/api/test_queue_api.py` when queue template/filter behavior changes
 
 ## Docker Usage
 

@@ -12,6 +12,7 @@ verifying actual index status.
 - Priority-based URL queue with manual override support
 - Scheduled jobs for submission, verification, and sitemap refresh
 - Web UI dashboard with queue management and statistics
+- Recursive sitemap index traversal with strict SSRF-safe child sitemap fetching
 - SQLite-backed persistence with WAL mode for crash-safety
 
 ## Project Layout
@@ -76,6 +77,17 @@ uv run seo-indexing-tracker
 - Web UI: http://localhost:8000
 - Health check: http://localhost:8000/health
 
+### UI Setup Workflow
+
+Use the UI for end-to-end setup and operations:
+
+1. Open `http://localhost:8000/ui/websites` and add a website.
+2. Open the website detail page and add a service account (`name`, `credentials_path`, scopes).
+3. Add one or more sitemaps on the same page.
+4. Click **Trigger indexing** to run discovery + enqueue for that website.
+5. Use `http://localhost:8000/ui/queue` to filter, reprioritize, and batch-manage URLs.
+6. Use delete actions from website detail and website list when cleaning up configuration.
+
 ## Available Commands
 
 ### Development
@@ -138,6 +150,23 @@ uv run typecheck
 | `SCHEDULER_INDEX_VERIFICATION_BATCH_SIZE` | URLs per verification batch | `100` |
 | `INDEXING_DAILY_QUOTA_LIMIT` | Indexing API daily limit per site | `200` |
 | `INSPECTION_DAILY_QUOTA_LIMIT` | Inspection API daily limit per site | `2000` |
+| `OUTBOUND_HTTP_USER_AGENT` | User-Agent for outbound sitemap/config validation HTTP requests | `BlueBeastBuildAgent` |
+
+## Sitemap Fetching and Trigger Diagnostics
+
+- Outbound sitemap/config validation requests use `OUTBOUND_HTTP_USER_AGENT`.
+- Form parsing in web UI routes depends on `python-multipart` (installed by `uv sync --extra dev`).
+- Sitemap fetcher retries 403 responses with alternate browser-like headers before failing.
+- Gzip/content-encoding mismatches are handled defensively; invalid compressed payloads fail with explicit fetch errors.
+- Trigger indexing feedback is stage-aware (`fetch`, discovery stages such as `parse`/policy stages, and `enqueue`).
+- Logs sanitize sitemap URLs to host/path form (`sitemap_url_sanitized`) to avoid leaking secrets in query strings.
+
+## Sitemap Child Traversal Security Model
+
+- Child sitemap URLs are accepted only for `http`/`https` and must pass host/IP policy validation.
+- Redirects are handled hop-by-hop with explicit location checks and per-hop policy validation.
+- Child fetches pin connect IPs resolved from validated DNS answers and can fall back across validated IPs.
+- Fetching fails closed when connect destination metadata is unavailable or resolves to disallowed address ranges.
 
 ## Docker Usage
 

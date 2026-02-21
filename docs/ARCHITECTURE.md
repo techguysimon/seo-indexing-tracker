@@ -96,7 +96,7 @@ Sitemap URL
     │
     ▼
 ┌─────────────────┐
-│ Sitemap Fetcher │  Fetch XML via HTTP (supports gzip)
+│ Sitemap Fetcher │  Fetch XML via HTTP (gzip + content-encoding hardening)
 └────────┬────────┘
          │
          ▼
@@ -107,7 +107,7 @@ Sitemap URL
            ▼
 ┌─────────────────────┐
 │ URL Parser          │  Extract URLs with lastmod, changefreq
-│ (lxml iterparse)    │
+│ + recurse child maps│
 └──────────┬──────────┘
            │
            ▼
@@ -122,6 +122,25 @@ Sitemap URL
 │ (enqueue new URLs) │  (recently modified = higher)
 └─────────────────────┘
 ```
+
+### Sitemap Child Traversal Security Model
+
+When a sitemap is a `<sitemapindex>`, child sitemap traversal is guarded by strict policy checks:
+
+1. **Child URL policy validation**: only `http`/`https`, hostname required, and resolved IPs must not be private/loopback/link-local/reserved/multicast/unspecified.
+2. **Explicit redirect handling**: redirects are followed manually (not automatically), with per-hop policy validation and hop limits.
+3. **Pinned connect destination**: fetches pin to validated connect IPs and can retry on validated fallback IPs for transient network failures.
+4. **Fail-closed destination checks**: if peer connect metadata is unavailable or disallowed, traversal fails instead of continuing.
+
+### Trigger Indexing Diagnostics
+
+Manual trigger indexing reports and logs failures by stage so operators can act quickly:
+
+- `fetch` for sitemap retrieval/HTTP problems
+- discovery processing stages such as `parse`, `index_depth_limit`, `index_child_limit`, `fetch_child_policy`, `fetch_child`
+- `enqueue` when queue persistence fails after discovery
+
+Structured logs use `sitemap_url_sanitized` (host/path only) for safer diagnostics.
 
 ### 2. Indexing Submission Flow
 
@@ -355,5 +374,6 @@ The frontend uses HTMX for dynamic interactions without JavaScript:
 
 - **Dashboard**: Overview with queue stats, recent activity
 - **Websites**: List, add, edit website configurations
-- **Queue**: View and manage URL queue, adjust priorities
+- **Website Detail**: End-to-end setup workflow (service account, sitemap management, trigger indexing, delete actions)
+- **Queue**: View and manage URL queue, adjust priorities, and run batch actions via HTMX partial updates
 - **Jobs**: Scheduler status and metrics
