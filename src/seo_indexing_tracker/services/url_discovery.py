@@ -270,6 +270,24 @@ async def _validate_child_sitemap_url_for_fetch(child_sitemap_url: str) -> None:
             )
 
 
+def _validate_child_fetch_connect_destination(
+    *,
+    peer_ip_address: str | None,
+) -> None:
+    if not peer_ip_address:
+        raise ValueError("connect_destination_unavailable")
+
+    try:
+        parsed_peer_ip_address = ipaddress.ip_address(peer_ip_address)
+    except ValueError as exc:
+        raise ValueError("connect_destination_unavailable") from exc
+
+    if _is_disallowed_ip_address(parsed_peer_ip_address):
+        raise ValueError(
+            f"connect_destination_disallowed:{parsed_peer_ip_address.compressed}"
+        )
+
+
 class URLDiscoveryService:
     """Discover sitemap URLs and classify changes from lastmod metadata."""
 
@@ -341,6 +359,21 @@ class URLDiscoveryService:
                     reason=exc.__class__.__name__,
                 ) from exc
 
+            try:
+                _validate_child_fetch_connect_destination(
+                    peer_ip_address=fetch_result.peer_ip_address,
+                )
+            except ValueError as exc:
+                raise URLDiscoveryProcessingError(
+                    stage="fetch_child_policy",
+                    website_id=root_sitemap.website_id,
+                    sitemap_id=root_sitemap.id,
+                    sitemap_url=child_sitemap_url,
+                    status_code=fetch_result.status_code,
+                    content_type=fetch_result.content_type,
+                    reason=str(exc),
+                ) from exc
+
             if fetch_result.status_code < 300 or fetch_result.status_code >= 400:
                 return fetch_result
 
@@ -358,7 +391,7 @@ class URLDiscoveryService:
             redirect_location = fetch_result.redirect_location
             if not redirect_location:
                 raise URLDiscoveryProcessingError(
-                    stage="fetch_child",
+                    stage="fetch_child_policy",
                     website_id=root_sitemap.website_id,
                     sitemap_id=root_sitemap.id,
                     sitemap_url=child_sitemap_url,

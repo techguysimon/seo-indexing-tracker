@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import ipaddress
 import logging
-from typing import Final
+from typing import Any, Final, cast
 from urllib.parse import urlsplit
 
 import httpx
@@ -50,6 +51,7 @@ class SitemapFetchResult:
     url: str
     not_modified: bool
     redirect_location: str | None = None
+    peer_ip_address: str | None = None
 
 
 class SitemapFetchError(Exception):
@@ -108,6 +110,61 @@ def _sanitize_sitemap_url(url: str) -> str:
     path = split_url.path or "/"
     sanitized = f"{host}{path}".strip()
     return sanitized or "sitemap"
+
+
+def _extract_ip_address_from_peer_address(peer_address: object) -> str | None:
+    if isinstance(peer_address, tuple):
+        if not peer_address:
+            return None
+        candidate_host = peer_address[0]
+    elif isinstance(peer_address, str):
+        candidate_host = peer_address
+    else:
+        return None
+
+    if not isinstance(candidate_host, str):
+        return None
+
+    try:
+        return ipaddress.ip_address(candidate_host).compressed
+    except ValueError:
+        return None
+
+
+def _extract_peer_ip_address(response: httpx.Response) -> str | None:
+    network_stream = response.extensions.get("network_stream")
+    if network_stream is None:
+        return None
+
+    extra_info_getter = getattr(network_stream, "get_extra_info", None)
+    if not callable(extra_info_getter):
+        return None
+
+    peer_address_candidates: list[object | None] = []
+    for key in ("server_addr", "peername"):
+        try:
+            peer_address_candidates.append(extra_info_getter(key))
+        except Exception:
+            peer_address_candidates.append(None)
+
+    try:
+        socket_object = extra_info_getter("socket")
+    except Exception:
+        socket_object = None
+
+    if socket_object is not None and hasattr(socket_object, "getpeername"):
+        socket_with_peer = cast(Any, socket_object)
+        try:
+            peer_address_candidates.append(socket_with_peer.getpeername())
+        except OSError:
+            peer_address_candidates.append(None)
+
+    for peer_address in peer_address_candidates:
+        peer_ip_address = _extract_ip_address_from_peer_address(peer_address)
+        if peer_ip_address is not None:
+            return peer_ip_address
+
+    return None
 
 
 async def _get_sitemap_with_403_retry(
@@ -188,6 +245,7 @@ async def fetch_sitemap(
                         url=str(response.url),
                         not_modified=True,
                         redirect_location=response.headers.get("location"),
+                        peer_ip_address=_extract_peer_ip_address(response),
                     )
 
                 response.raise_for_status()
@@ -221,6 +279,7 @@ async def fetch_sitemap(
                     url=str(response.url),
                     not_modified=False,
                     redirect_location=response.headers.get("location"),
+                    peer_ip_address=_extract_peer_ip_address(response),
                 )
             except httpx.TimeoutException as exc:
                 _logger.warning(

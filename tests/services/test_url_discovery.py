@@ -32,6 +32,7 @@ def _fetch_result(
     status_code: int | None = None,
     url: str = "https://example.com/sitemap.xml",
     redirect_location: str | None = None,
+    peer_ip_address: str | None = "93.184.216.34",
 ) -> SitemapFetchResult:
     return SitemapFetchResult(
         content=content.encode("utf-8") if content is not None else None,
@@ -44,6 +45,7 @@ def _fetch_result(
         url=url,
         not_modified=not_modified,
         redirect_location=redirect_location,
+        peer_ip_address=peer_ip_address,
     )
 
 
@@ -1121,6 +1123,303 @@ async def test_discover_urls_limits_child_redirect_hops(
         await URLDiscoveryService(session_factory=scoped_session).discover_urls(
             sitemap_id
         )
+
+    assert error_info.value.stage == "fetch_child_policy"
+    assert error_info.value.sitemap_url == "https://example.com/redirect-0.xml"
+    assert error_info.value.reason == "redirect_hops_exceeded"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_discover_urls_rejects_child_fetch_without_connect_destination_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_url = (
+        f"sqlite+aiosqlite:///{tmp_path / 'index-connect-destination.sqlite'}"
+    )
+    engine = create_async_engine(database_url)
+    session_factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    @asynccontextmanager
+    async def scoped_session() -> AsyncIterator[AsyncSession]:
+        session = session_factory()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with scoped_session() as session:
+        website = Website(domain="example.com", site_url="https://example.com")
+        session.add(website)
+        await session.flush()
+
+        sitemap = Sitemap(
+            website_id=website.id,
+            url="https://example.com/root-index.xml",
+            sitemap_type=SitemapType.INDEX,
+        )
+        session.add(sitemap)
+        await session.flush()
+        sitemap_id = sitemap.id
+
+    async def fake_fetch_sitemap(
+        url: str,
+        **_: str | bool | int | float | None,
+    ) -> SitemapFetchResult:
+        if url == "https://example.com/root-index.xml":
+            return _fetch_result(
+                content="""
+                <sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+                  <sitemap><loc>https://93.184.216.34/child.xml</loc></sitemap>
+                </sitemapindex>
+                """,
+                etag=None,
+                last_modified=None,
+                not_modified=False,
+                url=url,
+            )
+        if url == "https://93.184.216.34/child.xml":
+            return _fetch_result(
+                content="""
+                <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+                  <url><loc>https://example.com/should-not-be-added</loc></url>
+                </urlset>
+                """,
+                etag=None,
+                last_modified=None,
+                not_modified=False,
+                url=url,
+                peer_ip_address=None,
+            )
+        raise AssertionError(f"Unexpected URL fetch: {url}")
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.url_discovery.fetch_sitemap",
+        fake_fetch_sitemap,
+    )
+
+    with pytest.raises(URLDiscoveryProcessingError) as error_info:
+        await URLDiscoveryService(session_factory=scoped_session).discover_urls(
+            sitemap_id
+        )
+
+    assert error_info.value.stage == "fetch_child_policy"
+    assert error_info.value.sitemap_url == "https://93.184.216.34/child.xml"
+    assert error_info.value.reason == "connect_destination_unavailable"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_discover_urls_rejects_redirect_without_location_header(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_url = (
+        f"sqlite+aiosqlite:///{tmp_path / 'index-redirect-missing-location.sqlite'}"
+    )
+    engine = create_async_engine(database_url)
+    session_factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    @asynccontextmanager
+    async def scoped_session() -> AsyncIterator[AsyncSession]:
+        session = session_factory()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with scoped_session() as session:
+        website = Website(domain="example.com", site_url="https://example.com")
+        session.add(website)
+        await session.flush()
+
+        sitemap = Sitemap(
+            website_id=website.id,
+            url="https://example.com/root-index.xml",
+            sitemap_type=SitemapType.INDEX,
+        )
+        session.add(sitemap)
+        await session.flush()
+        sitemap_id = sitemap.id
+
+    async def fake_fetch_sitemap(
+        url: str,
+        **_: str | bool | int | float | None,
+    ) -> SitemapFetchResult:
+        if url == "https://example.com/root-index.xml":
+            return _fetch_result(
+                content="""
+                <sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+                  <sitemap><loc>https://example.com/child-start.xml</loc></sitemap>
+                </sitemapindex>
+                """,
+                etag=None,
+                last_modified=None,
+                not_modified=False,
+                url=url,
+            )
+        if url == "https://example.com/child-start.xml":
+            return _fetch_result(
+                content="",
+                etag=None,
+                last_modified=None,
+                not_modified=False,
+                status_code=302,
+                url=url,
+                redirect_location=None,
+            )
+        raise AssertionError(f"Unexpected URL fetch: {url}")
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.url_discovery.fetch_sitemap",
+        fake_fetch_sitemap,
+    )
+
+    with pytest.raises(URLDiscoveryProcessingError) as error_info:
+        await URLDiscoveryService(session_factory=scoped_session).discover_urls(
+            sitemap_id
+        )
+
+    assert error_info.value.stage == "fetch_child_policy"
+    assert error_info.value.sitemap_url == "https://example.com/child-start.xml"
+    assert error_info.value.reason == "redirect_missing_location"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_discover_urls_allows_exact_child_redirect_hop_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_url = (
+        f"sqlite+aiosqlite:///{tmp_path / 'index-redirect-limit-boundary.sqlite'}"
+    )
+    engine = create_async_engine(database_url)
+    session_factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    @asynccontextmanager
+    async def scoped_session() -> AsyncIterator[AsyncSession]:
+        session = session_factory()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with scoped_session() as session:
+        website = Website(domain="example.com", site_url="https://example.com")
+        session.add(website)
+        await session.flush()
+
+        sitemap = Sitemap(
+            website_id=website.id,
+            url="https://example.com/root-index.xml",
+            sitemap_type=SitemapType.INDEX,
+        )
+        session.add(sitemap)
+        await session.flush()
+        sitemap_id = sitemap.id
+
+    terminal_redirect_hop = 5
+
+    async def fake_fetch_sitemap(
+        url: str,
+        **_: str | bool | int | float | None,
+    ) -> SitemapFetchResult:
+        if url == "https://example.com/root-index.xml":
+            return _fetch_result(
+                content="""
+                <sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+                  <sitemap><loc>https://example.com/redirect-0.xml</loc></sitemap>
+                </sitemapindex>
+                """,
+                etag=None,
+                last_modified=None,
+                not_modified=False,
+                url=url,
+            )
+
+        if not url.startswith("https://example.com/redirect-"):
+            raise AssertionError(f"Unexpected URL fetch: {url}")
+
+        current_hop = int(url.removesuffix(".xml").split("-")[-1])
+        if current_hop < terminal_redirect_hop:
+            return _fetch_result(
+                content="",
+                etag=None,
+                last_modified=None,
+                not_modified=False,
+                status_code=302,
+                url=url,
+                redirect_location=f"https://example.com/redirect-{current_hop + 1}.xml",
+            )
+
+        return _fetch_result(
+            content="""
+            <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+              <url><loc>https://example.com/final-after-hops</loc></url>
+            </urlset>
+            """,
+            etag=None,
+            last_modified=None,
+            not_modified=False,
+            url=url,
+        )
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.url_discovery.fetch_sitemap",
+        fake_fetch_sitemap,
+    )
+
+    service = URLDiscoveryService(session_factory=scoped_session)
+    success_result = await service.discover_urls(sitemap_id)
+    assert success_result.total_discovered == 1
+
+    async with scoped_session() as session:
+        await session.execute(delete(URL).where(URL.website_id == website.id))
+
+    terminal_redirect_hop = 6
+    with pytest.raises(URLDiscoveryProcessingError) as error_info:
+        await service.discover_urls(sitemap_id)
 
     assert error_info.value.stage == "fetch_child_policy"
     assert error_info.value.sitemap_url == "https://example.com/redirect-0.xml"
