@@ -38,6 +38,41 @@ from seo_indexing_tracker.services.url_discovery import (
 )
 
 SessionScopeFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
+SENSITIVE_SITEMAP_URL = (
+    "https://user:password@example.com/sitemap.xml?token=super-secret#section"
+)
+SANITIZED_SITEMAP_URL = "example.com/sitemap.xml"
+
+
+def _trigger_log_payloads(caplog: pytest.LogCaptureFixture) -> list[dict[str, object]]:
+    payloads: list[dict[str, object]] = []
+    for record in caplog.records:
+        if isinstance(record.msg, dict):
+            payloads.append(record.msg)
+            continue
+
+        if isinstance(record.args, dict):
+            payloads.append(record.args)
+            continue
+
+        if (
+            isinstance(record.args, tuple)
+            and len(record.args) == 1
+            and isinstance(record.args[0], dict)
+        ):
+            payloads.append(record.args[0])
+
+    return payloads
+
+
+def _assert_payloads_do_not_leak_secrets(payloads: list[dict[str, object]]) -> None:
+    for payload in payloads:
+        for value in payload.values():
+            if not isinstance(value, str):
+                continue
+            assert "user:password@" not in value
+            assert "token=super-secret" not in value
+            assert "#section" not in value
 
 
 @contextmanager
@@ -339,13 +374,13 @@ async def test_trigger_indexing_handles_sitemap_fetch_http_status_branches(
                 assert "token=super-secret" not in response.text
                 assert "#fragment" not in response.text
 
-            logged_text = "\n".join(caplog.messages)
-            assert "example.com/sitemap.xml" in logged_text
-            assert "'stage': 'fetch'" in logged_text
-            assert "'sitemap_url_sanitized': 'example.com/sitemap.xml'" in logged_text
-            assert "user:password@" not in logged_text
-            assert "token=super-secret" not in logged_text
-            assert "#fragment" not in logged_text
+            payloads = _trigger_log_payloads(caplog)
+            assert any(
+                payload.get("stage") == "fetch"
+                and payload.get("sitemap_url_sanitized") == SANITIZED_SITEMAP_URL
+                for payload in payloads
+            )
+            _assert_payloads_do_not_leak_secrets(payloads)
     finally:
         await engine.dispose()
 
@@ -388,7 +423,7 @@ async def test_trigger_indexing_handles_discovery_stage_failures_with_friendly_f
         await session.flush()
         sitemap = Sitemap(
             website_id=website.id,
-            url="https://example.com/sitemap.xml",
+            url=SENSITIVE_SITEMAP_URL,
             sitemap_type=SitemapType.URLSET,
             is_active=True,
         )
@@ -401,7 +436,7 @@ async def test_trigger_indexing_handles_discovery_stage_failures_with_friendly_f
             stage="discovery",
             website_id=website_id,
             sitemap_id=discovered_sitemap_id,
-            sitemap_url="https://example.com/sitemap.xml",
+            sitemap_url=SENSITIVE_SITEMAP_URL,
             status_code=200,
             content_type="application/xml",
         )
@@ -431,12 +466,13 @@ async def test_trigger_indexing_handles_discovery_stage_failures_with_friendly_f
                 assert "sitemap discovery failed" in response.text
                 assert "Internal Server Error" not in response.text
 
-            logged_text = "\n".join(caplog.messages)
-            assert "'stage': 'discovery'" in logged_text
-            assert "'sitemap_url_sanitized': 'example.com/sitemap.xml'" in logged_text
-            assert "user:password@" not in logged_text
-            assert "token=super-secret" not in logged_text
-            assert "#fragment" not in logged_text
+            payloads = _trigger_log_payloads(caplog)
+            assert any(
+                payload.get("stage") == "discovery"
+                and payload.get("sitemap_url_sanitized") == SANITIZED_SITEMAP_URL
+                for payload in payloads
+            )
+            _assert_payloads_do_not_leak_secrets(payloads)
     finally:
         await engine.dispose()
 
@@ -479,7 +515,7 @@ async def test_trigger_indexing_enqueue_failure_rolls_back_discovered_changes(
         await session.flush()
         sitemap = Sitemap(
             website_id=website.id,
-            url="https://example.com/sitemap.xml",
+            url=SENSITIVE_SITEMAP_URL,
             sitemap_type=SitemapType.URLSET,
             is_active=True,
         )
@@ -545,12 +581,13 @@ async def test_trigger_indexing_enqueue_failure_rolls_back_discovered_changes(
                 assert "Trigger indexing failed" in response.text
                 assert "could not be queued" in response.text
 
-            logged_text = "\n".join(caplog.messages)
-            assert "'stage': 'enqueue'" in logged_text
-            assert "'sitemap_url_sanitized': None" in logged_text
-            assert "user:password@" not in logged_text
-            assert "token=super-secret" not in logged_text
-            assert "#fragment" not in logged_text
+            payloads = _trigger_log_payloads(caplog)
+            assert any(
+                payload.get("stage") == "enqueue"
+                and payload.get("sitemap_url_sanitized") == SANITIZED_SITEMAP_URL
+                for payload in payloads
+            )
+            _assert_payloads_do_not_leak_secrets(payloads)
 
         async with scoped_session() as session:
             persisted_urls = await session.scalars(

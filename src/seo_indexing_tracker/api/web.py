@@ -1039,6 +1039,9 @@ async def trigger_indexing(
     website_url_ids = list(
         await session.scalars(select(URL.id).where(URL.website_id == website_id))
     )
+    enqueue_context_sitemap_url = _safe_sitemap_url_for_feedback(
+        next(iter(sitemap_urls_by_id.values()), None)
+    )
     try:
         queued_urls = await queue_service.enqueue_many(website_url_ids)
     except Exception as error:
@@ -1047,7 +1050,7 @@ async def trigger_indexing(
                 "event": "trigger_indexing_failed",
                 "website_id": str(website_id),
                 "sitemap_id": None,
-                "sitemap_url_sanitized": None,
+                "sitemap_url_sanitized": enqueue_context_sitemap_url,
                 "stage": "enqueue",
                 "exception_class": error.__class__.__name__,
                 "http_status": None,
