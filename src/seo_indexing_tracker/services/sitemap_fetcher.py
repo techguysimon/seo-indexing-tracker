@@ -14,6 +14,8 @@ from seo_indexing_tracker.config import get_settings
 from seo_indexing_tracker.services.sitemap_decompressor import (
     SitemapDecompressionError,
     decompress_gzipped_content,
+    has_gzip_magic_bytes,
+    is_probably_xml_content,
     is_gzipped_sitemap,
 )
 
@@ -193,12 +195,19 @@ async def fetch_sitemap(
                     url=str(response.url),
                     content_encoding=response.headers.get("content-encoding"),
                 ):
-                    try:
-                        content = decompress_gzipped_content(content)
-                    except SitemapDecompressionError as exc:
+                    if has_gzip_magic_bytes(content):
+                        try:
+                            content = decompress_gzipped_content(content)
+                        except SitemapDecompressionError as exc:
+                            raise SitemapFetchDecompressionError(
+                                f"Failed to decompress sitemap {url!r}: {exc}"
+                            ) from exc
+                    elif not is_probably_xml_content(content):
                         raise SitemapFetchDecompressionError(
-                            f"Failed to decompress sitemap {url!r}: {exc}"
-                        ) from exc
+                            f"Failed to decompress sitemap {url!r}: "
+                            "Response indicated gzip compression, but payload "
+                            "was not gzip and did not look like XML"
+                        )
 
                 return SitemapFetchResult(
                     content=content,

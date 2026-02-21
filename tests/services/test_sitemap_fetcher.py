@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import gzip
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
-from seo_indexing_tracker.services.sitemap_fetcher import fetch_sitemap
+from seo_indexing_tracker.services.sitemap_fetcher import (
+    SitemapFetchDecompressionError,
+    fetch_sitemap,
+)
 
 
 @pytest.mark.asyncio
@@ -54,3 +58,165 @@ async def test_fetch_sitemap_retries_forbidden_with_configured_user_agent(
     assert "accept-language" in request_headers[1]
     assert request_headers[1]["if-none-match"] == '"etag-123"'
     assert request_headers[1]["if-modified-since"] == "Thu, 01 Jan 1970 00:00:00 GMT"
+
+
+@pytest.mark.asyncio
+async def test_fetch_sitemap_accepts_already_decoded_xml_when_gzip_header_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    xml_payload = b"<?xml version='1.0' encoding='UTF-8'?><urlset></urlset>"
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        *,
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        del self, headers
+        request = httpx.Request("GET", url)
+        response = httpx.Response(
+            status_code=200,
+            request=request,
+            headers={"content-type": "application/xml"},
+            content=xml_payload,
+        )
+        response.headers["content-encoding"] = "gzip"
+        return response
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.sitemap_fetcher.get_settings",
+        lambda: SimpleNamespace(OUTBOUND_HTTP_USER_AGENT="TestAgent/1.0"),
+    )
+
+    result = await fetch_sitemap("https://example.com/sitemap.xml", max_retries=0)
+
+    assert result.status_code == 200
+    assert result.content == xml_payload
+
+
+@pytest.mark.asyncio
+async def test_fetch_sitemap_decompresses_gzip_payload_when_magic_header_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    xml_payload = b"<urlset><url><loc>https://example.com/</loc></url></urlset>"
+    gzipped_payload = gzip.compress(xml_payload)
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        *,
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        del self, headers
+        request = httpx.Request("GET", url)
+        return httpx.Response(
+            status_code=200,
+            request=request,
+            headers={"content-encoding": "gzip", "content-type": "application/xml"},
+            content=gzipped_payload,
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.sitemap_fetcher.get_settings",
+        lambda: SimpleNamespace(OUTBOUND_HTTP_USER_AGENT="TestAgent/1.0"),
+    )
+
+    result = await fetch_sitemap("https://example.com/sitemap.xml", max_retries=0)
+
+    assert result.content == xml_payload
+
+
+@pytest.mark.asyncio
+async def test_fetch_sitemap_raises_for_non_xml_non_gzip_payload_marked_gzip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        *,
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        del self, headers
+        request = httpx.Request("GET", url)
+        response = httpx.Response(
+            status_code=200,
+            request=request,
+            headers={"content-type": "application/octet-stream"},
+            content=b"\x00\x01\x02\x03",
+        )
+        response.headers["content-encoding"] = "gzip"
+        return response
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.sitemap_fetcher.get_settings",
+        lambda: SimpleNamespace(OUTBOUND_HTTP_USER_AGENT="TestAgent/1.0"),
+    )
+
+    with pytest.raises(SitemapFetchDecompressionError):
+        await fetch_sitemap("https://example.com/sitemap.xml", max_retries=0)
+
+
+@pytest.mark.asyncio
+async def test_fetch_sitemap_raises_for_corrupted_gzip_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    corrupted_gzip_payload = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03bad"
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        *,
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        del self, headers
+        request = httpx.Request("GET", url)
+        return httpx.Response(
+            status_code=200,
+            request=request,
+            headers={"content-encoding": "gzip", "content-type": "application/xml"},
+            content=corrupted_gzip_payload,
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.sitemap_fetcher.get_settings",
+        lambda: SimpleNamespace(OUTBOUND_HTTP_USER_AGENT="TestAgent/1.0"),
+    )
+
+    with pytest.raises(SitemapFetchDecompressionError):
+        await fetch_sitemap("https://example.com/sitemap.xml", max_retries=0)
+
+
+@pytest.mark.asyncio
+async def test_fetch_sitemap_accepts_xml_for_gz_suffix_when_payload_not_gzipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    xml_payload = b"<?xml version='1.0'?><urlset></urlset>"
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        *,
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        del self, headers
+        request = httpx.Request("GET", url)
+        return httpx.Response(
+            status_code=200,
+            request=request,
+            headers={"content-type": "application/xml"},
+            content=xml_payload,
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.sitemap_fetcher.get_settings",
+        lambda: SimpleNamespace(OUTBOUND_HTTP_USER_AGENT="TestAgent/1.0"),
+    )
+
+    result = await fetch_sitemap("https://example.com/sitemap.xml.gz", max_retries=0)
+
+    assert result.content == xml_payload

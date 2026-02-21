@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 GZIP_FILE_SUFFIX: Final[str] = ".xml.gz"
 GZIP_CONTENT_ENCODING: Final[str] = "gzip"
 _GZIP_WBITS: Final[int] = 16 + zlib.MAX_WBITS
+_GZIP_MAGIC_BYTES: Final[bytes] = b"\x1f\x8b"
+_UTF8_BOM_BYTES: Final[bytes] = b"\xef\xbb\xbf"
 
 
 class SitemapDecompressionError(Exception):
@@ -27,6 +29,27 @@ def _header_contains_gzip(content_encoding: str) -> bool:
         token.strip().lower() for token in content_encoding.split(",") if token.strip()
     }
     return GZIP_CONTENT_ENCODING in encoding_tokens
+
+
+def has_gzip_magic_bytes(content: bytes) -> bool:
+    """Return True when bytes begin with the gzip magic header."""
+
+    return len(content) >= len(_GZIP_MAGIC_BYTES) and content.startswith(
+        _GZIP_MAGIC_BYTES
+    )
+
+
+def is_probably_xml_content(content: bytes) -> bool:
+    """Return True when payload appears to already be XML text."""
+
+    if not content:
+        return False
+
+    stripped = content.lstrip()
+    if stripped.startswith(_UTF8_BOM_BYTES):
+        stripped = stripped[len(_UTF8_BOM_BYTES) :].lstrip()
+
+    return stripped.startswith(b"<")
 
 
 def is_gzipped_sitemap(
