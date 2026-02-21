@@ -49,6 +49,7 @@ class SitemapFetchResult:
     content_type: str | None
     url: str
     not_modified: bool
+    redirect_location: str | None = None
 
 
 class SitemapFetchError(Exception):
@@ -143,6 +144,7 @@ async def fetch_sitemap(
     max_retries: int = DEFAULT_MAX_RETRIES,
     backoff_base_seconds: float = DEFAULT_BACKOFF_BASE_SECONDS,
     user_agent: str | None = None,
+    follow_redirects: bool = True,
 ) -> SitemapFetchResult:
     """Fetch a sitemap URL asynchronously with retries and conditional headers."""
 
@@ -164,7 +166,7 @@ async def fetch_sitemap(
 
     async with httpx.AsyncClient(
         timeout=timeout,
-        follow_redirects=True,
+        follow_redirects=follow_redirects,
         max_redirects=max_redirects,
     ) as client:
         for attempt in range(max_retries + 1):
@@ -185,6 +187,7 @@ async def fetch_sitemap(
                         content_type=response.headers.get("content-type"),
                         url=str(response.url),
                         not_modified=True,
+                        redirect_location=response.headers.get("location"),
                     )
 
                 response.raise_for_status()
@@ -217,6 +220,7 @@ async def fetch_sitemap(
                     content_type=response.headers.get("content-type"),
                     url=str(response.url),
                     not_modified=False,
+                    redirect_location=response.headers.get("location"),
                 )
             except httpx.TimeoutException as exc:
                 _logger.warning(

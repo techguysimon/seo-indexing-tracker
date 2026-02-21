@@ -12,7 +12,7 @@ import ipaddress
 import logging
 import socket
 from typing import Any, cast
-from urllib.parse import SplitResult, urlsplit, urlunsplit
+from urllib.parse import SplitResult, urljoin, urlsplit, urlunsplit
 from uuid import UUID
 
 from lxml import etree  # type: ignore[import-untyped]
@@ -38,6 +38,7 @@ from seo_indexing_tracker.services.sitemap_url_parser import (
 
 DEFAULT_BATCH_SIZE = 500
 DEFAULT_INDEX_CHILD_MAX_COUNT = 500
+DEFAULT_CHILD_FETCH_MAX_REDIRECT_HOPS = 5
 
 SessionScopeFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
@@ -299,6 +300,93 @@ class URLDiscoveryService:
         self._index_max_depth = index_max_depth
         self._index_child_max_count = index_child_max_count
 
+    async def _fetch_child_sitemap_with_policy(
+        self,
+        *,
+        root_sitemap: Sitemap,
+        child_sitemap_url: str,
+        max_redirect_hops: int = DEFAULT_CHILD_FETCH_MAX_REDIRECT_HOPS,
+    ) -> SitemapFetchResult:
+        if max_redirect_hops < 0:
+            raise ValueError("max_redirect_hops must be zero or greater")
+
+        current_child_url = child_sitemap_url
+        redirect_hops = 0
+
+        while True:
+            try:
+                await _validate_child_sitemap_url_for_fetch(current_child_url)
+            except ValueError as exc:
+                raise URLDiscoveryProcessingError(
+                    stage="fetch_child_policy",
+                    website_id=root_sitemap.website_id,
+                    sitemap_id=root_sitemap.id,
+                    sitemap_url=child_sitemap_url,
+                    reason=str(exc),
+                ) from exc
+
+            try:
+                fetch_result = await fetch_sitemap(
+                    current_child_url,
+                    follow_redirects=False,
+                )
+            except SitemapFetchError as exc:
+                raise URLDiscoveryProcessingError(
+                    stage="fetch_child",
+                    website_id=root_sitemap.website_id,
+                    sitemap_id=root_sitemap.id,
+                    sitemap_url=child_sitemap_url,
+                    status_code=getattr(exc, "status_code", None),
+                    content_type=getattr(exc, "content_type", None),
+                    reason=exc.__class__.__name__,
+                ) from exc
+
+            if fetch_result.status_code < 300 or fetch_result.status_code >= 400:
+                return fetch_result
+
+            if redirect_hops >= max_redirect_hops:
+                raise URLDiscoveryProcessingError(
+                    stage="fetch_child_policy",
+                    website_id=root_sitemap.website_id,
+                    sitemap_id=root_sitemap.id,
+                    sitemap_url=child_sitemap_url,
+                    status_code=fetch_result.status_code,
+                    content_type=fetch_result.content_type,
+                    reason="redirect_hops_exceeded",
+                )
+
+            redirect_location = fetch_result.redirect_location
+            if not redirect_location:
+                raise URLDiscoveryProcessingError(
+                    stage="fetch_child",
+                    website_id=root_sitemap.website_id,
+                    sitemap_id=root_sitemap.id,
+                    sitemap_url=child_sitemap_url,
+                    status_code=fetch_result.status_code,
+                    content_type=fetch_result.content_type,
+                    reason="redirect_missing_location",
+                )
+
+            redirect_target_url = urljoin(fetch_result.url, redirect_location)
+            try:
+                await _validate_child_sitemap_url_for_fetch(redirect_target_url)
+            except ValueError as exc:
+                raise URLDiscoveryProcessingError(
+                    stage="fetch_child_policy",
+                    website_id=root_sitemap.website_id,
+                    sitemap_id=root_sitemap.id,
+                    sitemap_url=child_sitemap_url,
+                    status_code=fetch_result.status_code,
+                    content_type=fetch_result.content_type,
+                    reason=(
+                        "redirect_target_disallowed:"
+                        f"{_sanitize_sitemap_url(redirect_target_url)}:{exc}"
+                    ),
+                ) from exc
+
+            current_child_url = redirect_target_url
+            redirect_hops += 1
+
     async def _discover_records_by_url(
         self,
         *,
@@ -404,29 +492,10 @@ class URLDiscoveryService:
                         content_type=sitemap_document.content_type,
                     )
 
-                try:
-                    await _validate_child_sitemap_url_for_fetch(child_sitemap_url)
-                except ValueError as exc:
-                    raise URLDiscoveryProcessingError(
-                        stage="fetch_child_policy",
-                        website_id=root_sitemap.website_id,
-                        sitemap_id=root_sitemap.id,
-                        sitemap_url=child_sitemap_url,
-                        reason=str(exc),
-                    ) from exc
-
-                try:
-                    child_fetch_result = await fetch_sitemap(child_sitemap_url)
-                except SitemapFetchError as exc:
-                    raise URLDiscoveryProcessingError(
-                        stage="fetch_child",
-                        website_id=root_sitemap.website_id,
-                        sitemap_id=root_sitemap.id,
-                        sitemap_url=child_sitemap_url,
-                        status_code=getattr(exc, "status_code", None),
-                        content_type=getattr(exc, "content_type", None),
-                        reason=exc.__class__.__name__,
-                    ) from exc
+                child_fetch_result = await self._fetch_child_sitemap_with_policy(
+                    root_sitemap=root_sitemap,
+                    child_sitemap_url=child_sitemap_url,
+                )
 
                 if child_fetch_result.content is None:
                     raise URLDiscoveryProcessingError(
