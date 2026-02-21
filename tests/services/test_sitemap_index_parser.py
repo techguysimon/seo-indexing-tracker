@@ -17,6 +17,7 @@ def _fetch_result(url: str, content: str) -> SitemapFetchResult:
         etag=None,
         last_modified=None,
         status_code=200,
+        content_type="application/xml",
         url=url,
         not_modified=False,
     )

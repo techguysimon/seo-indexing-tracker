@@ -24,15 +24,16 @@ from seo_indexing_tracker.database import get_db_session
 from seo_indexing_tracker.main import create_app
 from seo_indexing_tracker.models import Base, Sitemap, SitemapType, Website
 from seo_indexing_tracker.services.sitemap_fetcher import (
-    SitemapFetchError,
-    SitemapFetchHTTPError,
+    SitemapFetchNetworkError,
+    SitemapFetchResult,
+    SitemapFetchTimeoutError,
 )
 
 SessionScopeFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
 
 @pytest.mark.asyncio
-async def test_trigger_indexing_returns_friendly_response_for_sitemap_fetch_errors(
+async def test_trigger_indexing_returns_parse_message_for_non_xml_sitemap_response(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -75,18 +76,23 @@ async def test_trigger_indexing_returns_friendly_response_for_sitemap_fetch_erro
         await session.flush()
         website_id: UUID = website.id
 
-    async def fake_discover_urls(self: object, sitemap_id: UUID) -> object:  # noqa: ARG001
-        raise SitemapFetchHTTPError(
+    async def fake_fetch_sitemap(_: str, **__: str | None) -> SitemapFetchResult:
+        return SitemapFetchResult(
+            content=b"this is not xml",
+            etag=None,
+            last_modified=None,
+            status_code=200,
+            content_type="text/html",
             url=(
                 "https://user:password@example.com/sitemap.xml"
                 "?token=super-secret#section"
             ),
-            status_code=403,
+            not_modified=False,
         )
 
     monkeypatch.setattr(
-        "seo_indexing_tracker.api.web.URLDiscoveryService.discover_urls",
-        fake_discover_urls,
+        "seo_indexing_tracker.services.url_discovery.fetch_sitemap",
+        fake_fetch_sitemap,
     )
 
     app = create_app()
@@ -106,11 +112,13 @@ async def test_trigger_indexing_returns_friendly_response_for_sitemap_fetch_erro
             )
             assert htmx_response.status_code == 200
             assert "Trigger indexing failed" in htmx_response.text
+            assert "not valid XML" in htmx_response.text
             assert "hero-panel" not in htmx_response.text
 
             full_page_response = await client.post(f"/ui/websites/{website_id}/trigger")
             assert full_page_response.status_code == 200
             assert "Trigger indexing failed" in full_page_response.text
+            assert "not valid XML" in full_page_response.text
             assert "example.com/sitemap.xml" in full_page_response.text
             assert "user:password@" not in full_page_response.text
             assert "token=super-secret" not in full_page_response.text
@@ -121,9 +129,24 @@ async def test_trigger_indexing_returns_friendly_response_for_sitemap_fetch_erro
 
 
 @pytest.mark.asyncio
-async def test_trigger_indexing_handles_non_http_sitemap_fetch_errors(
+@pytest.mark.parametrize(
+    ("error", "expected_text"),
+    [
+        (
+            SitemapFetchTimeoutError("timeout after retries"),
+            "network timeout while fetching sitemap",
+        ),
+        (
+            SitemapFetchNetworkError("network unreachable"),
+            "network error while fetching sitemap",
+        ),
+    ],
+)
+async def test_trigger_indexing_handles_timeout_and_network_sitemap_fetch_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    expected_text: str,
 ) -> None:
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'web-trigger-non-http.sqlite'}"
     engine: AsyncEngine = create_async_engine(database_url)
@@ -165,7 +188,7 @@ async def test_trigger_indexing_handles_non_http_sitemap_fetch_errors(
         website_id: UUID = website.id
 
     async def fake_discover_urls(self: object, sitemap_id: UUID) -> object:  # noqa: ARG001
-        raise SitemapFetchError("network timeout while fetching sitemap")
+        raise error
 
     monkeypatch.setattr(
         "seo_indexing_tracker.api.web.URLDiscoveryService.discover_urls",
@@ -189,11 +212,13 @@ async def test_trigger_indexing_handles_non_http_sitemap_fetch_errors(
             )
             assert htmx_response.status_code == 200
             assert "Trigger indexing failed" in htmx_response.text
+            assert expected_text in htmx_response.text
             assert "hero-panel" not in htmx_response.text
 
             full_page_response = await client.post(f"/ui/websites/{website_id}/trigger")
             assert full_page_response.status_code == 200
             assert "Trigger indexing failed" in full_page_response.text
+            assert expected_text in full_page_response.text
             assert "hero-panel" in full_page_response.text
     finally:
         await engine.dispose()

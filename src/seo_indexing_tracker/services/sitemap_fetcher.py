@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import logging
 from typing import Final
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -31,6 +33,8 @@ ALTERNATE_BROWSER_HEADERS: Final[dict[str, str]] = {
     "Accept-Language": "en-GB,en;q=0.8",
 }
 
+_logger = logging.getLogger("seo_indexing_tracker.sitemap.fetcher")
+
 
 @dataclass(slots=True, frozen=True)
 class SitemapFetchResult:
@@ -40,6 +44,7 @@ class SitemapFetchResult:
     etag: str | None
     last_modified: str | None
     status_code: int
+    content_type: str | None
     url: str
     not_modified: bool
 
@@ -59,9 +64,16 @@ class SitemapFetchNetworkError(SitemapFetchError):
 class SitemapFetchHTTPError(SitemapFetchError):
     """Raised when sitemap fetch receives an unrecoverable HTTP status."""
 
-    def __init__(self, url: str, status_code: int) -> None:
+    def __init__(
+        self,
+        url: str,
+        status_code: int,
+        *,
+        content_type: str | None = None,
+    ) -> None:
         self.url = url
         self.status_code = status_code
+        self.content_type = content_type
         super().__init__(f"Failed to fetch sitemap {url!r}: HTTP {status_code}")
 
 
@@ -85,6 +97,14 @@ def _build_conditional_headers(
 
 def _retry_delay_seconds(attempt_index: int, backoff_base_seconds: float) -> float:
     return float(backoff_base_seconds * (2**attempt_index))
+
+
+def _sanitize_sitemap_url(url: str) -> str:
+    split_url = urlsplit(url)
+    host = split_url.netloc.rsplit("@", maxsplit=1)[-1]
+    path = split_url.path or "/"
+    sanitized = f"{host}{path}".strip()
+    return sanitized or "sitemap"
 
 
 async def _get_sitemap_with_403_retry(
@@ -160,6 +180,7 @@ async def fetch_sitemap(
                         etag=response.headers.get("etag"),
                         last_modified=response.headers.get("last-modified"),
                         status_code=response.status_code,
+                        content_type=response.headers.get("content-type"),
                         url=str(response.url),
                         not_modified=True,
                     )
@@ -184,15 +205,36 @@ async def fetch_sitemap(
                     etag=response.headers.get("etag"),
                     last_modified=response.headers.get("last-modified"),
                     status_code=response.status_code,
+                    content_type=response.headers.get("content-type"),
                     url=str(response.url),
                     not_modified=False,
                 )
             except httpx.TimeoutException as exc:
+                _logger.warning(
+                    {
+                        "event": "sitemap_fetch_timeout",
+                        "stage": "fetch",
+                        "sitemap_url_sanitized": _sanitize_sitemap_url(url),
+                        "attempt": attempt + 1,
+                        "max_attempts": max_retries + 1,
+                        "exception_class": exc.__class__.__name__,
+                    }
+                )
                 if attempt == max_retries:
                     raise SitemapFetchTimeoutError(
                         f"Timed out fetching sitemap {url!r} after {max_retries + 1} attempts"
                     ) from exc
             except httpx.NetworkError as exc:
+                _logger.warning(
+                    {
+                        "event": "sitemap_fetch_network_error",
+                        "stage": "fetch",
+                        "sitemap_url_sanitized": _sanitize_sitemap_url(url),
+                        "attempt": attempt + 1,
+                        "max_attempts": max_retries + 1,
+                        "exception_class": exc.__class__.__name__,
+                    }
+                )
                 if attempt == max_retries:
                     raise SitemapFetchNetworkError(
                         f"Network error fetching sitemap {url!r} after {max_retries + 1} attempts: {exc}"
@@ -200,11 +242,36 @@ async def fetch_sitemap(
             except httpx.HTTPStatusError as exc:
                 status_code = exc.response.status_code
                 is_transient_status = status_code in TRANSIENT_HTTP_STATUS_CODES
+                _logger.warning(
+                    {
+                        "event": "sitemap_fetch_http_status",
+                        "stage": "fetch",
+                        "sitemap_url_sanitized": _sanitize_sitemap_url(url),
+                        "attempt": attempt + 1,
+                        "max_attempts": max_retries + 1,
+                        "http_status": status_code,
+                        "content_type": exc.response.headers.get("content-type"),
+                        "exception_class": exc.__class__.__name__,
+                        "retryable": is_transient_status,
+                    }
+                )
                 if not is_transient_status or attempt == max_retries:
                     raise SitemapFetchHTTPError(
-                        url=url, status_code=status_code
+                        url=str(exc.response.url),
+                        status_code=status_code,
+                        content_type=exc.response.headers.get("content-type"),
                     ) from exc
             except httpx.HTTPError as exc:
+                _logger.exception(
+                    {
+                        "event": "sitemap_fetch_http_error",
+                        "stage": "fetch",
+                        "sitemap_url_sanitized": _sanitize_sitemap_url(url),
+                        "attempt": attempt + 1,
+                        "max_attempts": max_retries + 1,
+                        "exception_class": exc.__class__.__name__,
+                    }
+                )
                 raise SitemapFetchError(
                     f"HTTP error while fetching sitemap {url!r}: {exc}"
                 ) from exc

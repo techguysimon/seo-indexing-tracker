@@ -28,6 +28,7 @@ def _fetch_result(
         etag=etag,
         last_modified=last_modified,
         status_code=304 if not_modified else 200,
+        content_type="application/xml",
         url="https://example.com/sitemap.xml",
         not_modified=not_modified,
     )

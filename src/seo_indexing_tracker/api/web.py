@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
+import logging
 from math import ceil
 from typing import TypedDict
 from urllib.parse import urlsplit
@@ -32,13 +33,19 @@ from seo_indexing_tracker.services.config_validation import (
 from seo_indexing_tracker.services.priority_queue import PriorityQueueService
 from seo_indexing_tracker.services.sitemap_fetcher import (
     SitemapFetchError,
+    SitemapFetchNetworkError,
+    SitemapFetchTimeoutError,
     SitemapFetchHTTPError,
 )
-from seo_indexing_tracker.services.url_discovery import URLDiscoveryService
+from seo_indexing_tracker.services.url_discovery import (
+    URLDiscoveryProcessingError,
+    URLDiscoveryService,
+)
 
 router = APIRouter(tags=["web"])
 
 _config_validation_service = ConfigurationValidationService()
+_trigger_logger = logging.getLogger("seo_indexing_tracker.web.trigger_indexing")
 _DEFAULT_PAGE_SIZE = 12
 _MAX_PAGE_SIZE = 100
 _ALLOWED_SERVICE_ACCOUNT_SCOPES = frozenset({"indexing", "webmasters"})
@@ -115,6 +122,59 @@ def _safe_sitemap_url_for_feedback(url: str | None) -> str:
     path = split_url.path or "/"
     safe_url = f"{host}{path}".strip()
     return safe_url or "sitemap"
+
+
+def _trigger_feedback_for_fetch_error(
+    *,
+    error: SitemapFetchError,
+    safe_sitemap_url: str,
+) -> str:
+    if isinstance(error, SitemapFetchTimeoutError):
+        return (
+            "Trigger indexing failed: network timeout while fetching sitemap "
+            f"({safe_sitemap_url}). Retry in a moment."
+        )
+
+    if isinstance(error, SitemapFetchNetworkError):
+        return (
+            "Trigger indexing failed: network error while fetching sitemap "
+            f"({safe_sitemap_url}). Verify DNS/firewall access and retry."
+        )
+
+    if isinstance(error, SitemapFetchHTTPError):
+        if error.status_code in {401, 403}:
+            return (
+                "Trigger indexing failed: sitemap access blocked "
+                f"({safe_sitemap_url}, HTTP {error.status_code}). "
+                "Verify sitemap access rules and retry."
+            )
+
+        return (
+            "Trigger indexing failed: sitemap fetch returned an HTTP error "
+            f"({safe_sitemap_url}, HTTP {error.status_code})."
+        )
+
+    return (
+        "Trigger indexing failed: unable to fetch sitemap "
+        f"({safe_sitemap_url}). Verify sitemap access rules and retry."
+    )
+
+
+def _trigger_feedback_for_discovery_error(
+    *,
+    error: URLDiscoveryProcessingError,
+    safe_sitemap_url: str,
+) -> str:
+    if error.stage == "parse":
+        return (
+            "Trigger indexing failed: sitemap response was not valid XML "
+            f"({safe_sitemap_url})."
+        )
+
+    return (
+        "Trigger indexing failed: sitemap discovery failed "
+        f"({safe_sitemap_url}) before URLs could be queued."
+    )
 
 
 def _is_htmx_request(request: Request) -> bool:
@@ -889,47 +949,104 @@ async def trigger_indexing(
     queue_service = PriorityQueueService(
         session_factory=lambda: _use_existing_session(session)
     )
-    sitemap_ids = list(
-        await session.scalars(
-            select(Sitemap.id).where(
+    sitemap_rows = (
+        await session.execute(
+            select(Sitemap.id, Sitemap.url).where(
                 Sitemap.website_id == website_id,
                 Sitemap.is_active.is_(True),
             )
         )
-    )
+    ).all()
+    sitemap_ids = [row.id for row in sitemap_rows]
+    sitemap_urls_by_id = {row.id: row.url for row in sitemap_rows}
 
     discovered_urls = 0
-    try:
-        for sitemap_id in sitemap_ids:
+    for sitemap_id in sitemap_ids:
+        sitemap_url = sitemap_urls_by_id.get(sitemap_id)
+        safe_sitemap_url = _safe_sitemap_url_for_feedback(sitemap_url)
+        try:
             discovery_result = await discovery_service.discover_urls(sitemap_id)
             discovered_urls += (
                 discovery_result.new_count + discovery_result.modified_count
             )
-    except SitemapFetchError as error:
-        feedback = "Trigger indexing failed: unable to fetch sitemap."
-        if isinstance(error, SitemapFetchHTTPError):
-            safe_sitemap_url = _safe_sitemap_url_for_feedback(error.url)
-            feedback = (
-                "Trigger indexing failed: "
-                f"unable to fetch sitemap ({safe_sitemap_url}, HTTP {error.status_code}). "
-                "Verify sitemap access rules and retry."
+        except SitemapFetchError as error:
+            error_url = getattr(error, "url", None)
+            safe_error_url = (
+                _safe_sitemap_url_for_feedback(error_url) if error_url else None
             )
-        else:
-            feedback = (
-                "Trigger indexing failed: unable to fetch sitemap. "
-                "Verify sitemap access rules and retry."
+            _trigger_logger.exception(
+                {
+                    "event": "trigger_indexing_failed",
+                    "website_id": str(website_id),
+                    "sitemap_id": str(sitemap_id),
+                    "sitemap_url_sanitized": safe_error_url or safe_sitemap_url,
+                    "stage": "fetch",
+                    "exception_class": error.__class__.__name__,
+                    "http_status": getattr(error, "status_code", None),
+                    "content_type": getattr(error, "content_type", None),
+                }
             )
-        return await _render_website_detail(
-            request=request,
-            session=session,
-            website_id=website_id,
-            feedback=feedback,
-        )
+            feedback = _trigger_feedback_for_fetch_error(
+                error=error,
+                safe_sitemap_url=safe_error_url or safe_sitemap_url,
+            )
+            return await _render_website_detail(
+                request=request,
+                session=session,
+                website_id=website_id,
+                feedback=feedback,
+            )
+        except URLDiscoveryProcessingError as error:
+            _trigger_logger.exception(
+                {
+                    "event": "trigger_indexing_failed",
+                    "website_id": str(website_id),
+                    "sitemap_id": str(sitemap_id),
+                    "sitemap_url_sanitized": safe_sitemap_url,
+                    "stage": error.stage,
+                    "exception_class": error.__class__.__name__,
+                    "http_status": error.status_code,
+                    "content_type": error.content_type,
+                }
+            )
+            feedback = _trigger_feedback_for_discovery_error(
+                error=error,
+                safe_sitemap_url=safe_sitemap_url,
+            )
+            return await _render_website_detail(
+                request=request,
+                session=session,
+                website_id=website_id,
+                feedback=feedback,
+            )
 
     website_url_ids = list(
         await session.scalars(select(URL.id).where(URL.website_id == website_id))
     )
-    queued_urls = await queue_service.enqueue_many(website_url_ids)
+    try:
+        queued_urls = await queue_service.enqueue_many(website_url_ids)
+    except Exception as error:
+        _trigger_logger.exception(
+            {
+                "event": "trigger_indexing_failed",
+                "website_id": str(website_id),
+                "sitemap_id": None,
+                "sitemap_url_sanitized": None,
+                "stage": "enqueue",
+                "exception_class": error.__class__.__name__,
+                "http_status": None,
+                "content_type": None,
+            }
+        )
+        return await _render_website_detail(
+            request=request,
+            session=session,
+            website_id=website_id,
+            feedback=(
+                "Trigger indexing failed: discovered URLs could not be queued. "
+                "Review server logs for enqueue diagnostics and retry."
+            ),
+        )
     feedback = (
         "Indexing triggered: "
         f"refreshed {len(sitemap_ids)} sitemaps, "
