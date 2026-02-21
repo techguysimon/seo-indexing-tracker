@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from seo_indexing_tracker.models import Base, Sitemap, SitemapType, URL, Website
 from seo_indexing_tracker.services.sitemap_fetcher import (
+    SitemapFetchHTTPError,
     SitemapFetchNetworkError,
     SitemapFetchResult,
 )
@@ -631,6 +632,240 @@ async def test_discover_urls_depth_limit_ignores_duplicate_cycle_children(
     assert result.new_count == 0
     assert result.modified_count == 0
     assert result.unchanged_count == 0
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_discover_urls_retries_child_fetch_with_next_validated_ip_on_network_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'index-fetch-ip-fallback.sqlite'}"
+    engine = create_async_engine(database_url)
+    session_factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    @asynccontextmanager
+    async def scoped_session() -> AsyncIterator[AsyncSession]:
+        session = session_factory()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with scoped_session() as session:
+        website = Website(domain="example.com", site_url="https://example.com")
+        session.add(website)
+        await session.flush()
+
+        sitemap = Sitemap(
+            website_id=website.id,
+            url="https://example.com/sitemap-index.xml",
+            sitemap_type=SitemapType.INDEX,
+        )
+        session.add(sitemap)
+        await session.flush()
+        sitemap_id = sitemap.id
+
+    fetch_attempts: list[tuple[str, str | None]] = []
+
+    async def fake_fetch_sitemap(
+        url: str,
+        **kwargs: str | bool | int | float | None,
+    ) -> SitemapFetchResult:
+        pinned_connect_ip = kwargs.get("pinned_connect_ip")
+        fetch_attempts.append(
+            (url, pinned_connect_ip if isinstance(pinned_connect_ip, str) else None)
+        )
+        if url == "https://example.com/sitemap-index.xml":
+            return _fetch_result(
+                content="""
+                <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+                  <sitemap><loc>https://example.com/child.xml</loc></sitemap>
+                </sitemapindex>
+                """,
+                etag=None,
+                last_modified=None,
+                not_modified=False,
+                url=url,
+            )
+
+        if url != "https://example.com/child.xml":
+            raise AssertionError(f"Unexpected URL fetch: {url}")
+
+        if pinned_connect_ip == "93.184.216.34":
+            raise SitemapFetchNetworkError("first validated IP unreachable")
+
+        if pinned_connect_ip == "93.184.216.35":
+            return _fetch_result(
+                content="""
+                <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+                  <url><loc>https://example.com/final</loc></url>
+                </urlset>
+                """,
+                etag=None,
+                last_modified=None,
+                not_modified=False,
+                url=url,
+                peer_ip_address="93.184.216.35",
+            )
+
+        raise AssertionError(f"Unexpected pinned IP: {pinned_connect_ip}")
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.url_discovery.fetch_sitemap",
+        fake_fetch_sitemap,
+    )
+
+    resolve_calls: list[str] = []
+
+    async def fake_resolve_host_ip_addresses(
+        host_name: str,
+    ) -> tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]:
+        resolve_calls.append(host_name)
+        if host_name == "example.com":
+            return (
+                ipaddress.ip_address("93.184.216.34"),
+                ipaddress.ip_address("93.184.216.35"),
+            )
+        raise AssertionError(f"Unexpected host resolution: {host_name}")
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.url_discovery._resolve_host_ip_addresses",
+        fake_resolve_host_ip_addresses,
+    )
+
+    result = await URLDiscoveryService(session_factory=scoped_session).discover_urls(
+        sitemap_id
+    )
+
+    assert result.total_discovered == 1
+    assert resolve_calls == ["example.com"]
+    assert fetch_attempts == [
+        ("https://example.com/sitemap-index.xml", None),
+        ("https://example.com/child.xml", "93.184.216.34"),
+        ("https://example.com/child.xml", "93.184.216.35"),
+    ]
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_discover_urls_does_not_retry_child_fetch_with_next_ip_on_http_status_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_url = (
+        f"sqlite+aiosqlite:///{tmp_path / 'index-fetch-ip-no-fallback.sqlite'}"
+    )
+    engine = create_async_engine(database_url)
+    session_factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    @asynccontextmanager
+    async def scoped_session() -> AsyncIterator[AsyncSession]:
+        session = session_factory()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with scoped_session() as session:
+        website = Website(domain="example.com", site_url="https://example.com")
+        session.add(website)
+        await session.flush()
+
+        sitemap = Sitemap(
+            website_id=website.id,
+            url="https://example.com/sitemap-index.xml",
+            sitemap_type=SitemapType.INDEX,
+        )
+        session.add(sitemap)
+        await session.flush()
+        sitemap_id = sitemap.id
+
+    fetch_attempts: list[tuple[str, str | None]] = []
+
+    async def fake_fetch_sitemap(
+        url: str,
+        **kwargs: str | bool | int | float | None,
+    ) -> SitemapFetchResult:
+        pinned_connect_ip = kwargs.get("pinned_connect_ip")
+        fetch_attempts.append(
+            (url, pinned_connect_ip if isinstance(pinned_connect_ip, str) else None)
+        )
+        if url == "https://example.com/sitemap-index.xml":
+            return _fetch_result(
+                content="""
+                <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+                  <sitemap><loc>https://example.com/child.xml</loc></sitemap>
+                </sitemapindex>
+                """,
+                etag=None,
+                last_modified=None,
+                not_modified=False,
+                url=url,
+            )
+
+        if url == "https://example.com/child.xml":
+            raise SitemapFetchHTTPError(url=url, status_code=503)
+
+        raise AssertionError(f"Unexpected URL fetch: {url}")
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.url_discovery.fetch_sitemap",
+        fake_fetch_sitemap,
+    )
+
+    async def fake_resolve_host_ip_addresses(
+        host_name: str,
+    ) -> tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]:
+        if host_name == "example.com":
+            return (
+                ipaddress.ip_address("93.184.216.34"),
+                ipaddress.ip_address("93.184.216.35"),
+            )
+        raise AssertionError(f"Unexpected host resolution: {host_name}")
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.url_discovery._resolve_host_ip_addresses",
+        fake_resolve_host_ip_addresses,
+    )
+
+    with pytest.raises(URLDiscoveryProcessingError) as error_info:
+        await URLDiscoveryService(session_factory=scoped_session).discover_urls(
+            sitemap_id
+        )
+
+    assert error_info.value.stage == "fetch_child"
+    assert error_info.value.sitemap_url == "https://example.com/child.xml"
+    assert fetch_attempts == [
+        ("https://example.com/sitemap-index.xml", None),
+        ("https://example.com/child.xml", "93.184.216.34"),
+    ]
 
     await engine.dispose()
 

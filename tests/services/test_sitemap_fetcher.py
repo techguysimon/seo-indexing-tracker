@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import gzip
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -309,3 +309,147 @@ async def test_fetch_sitemap_returns_none_when_peer_ip_metadata_missing(
     result = await fetch_sitemap("https://example.com/sitemap.xml", max_retries=0)
 
     assert result.peer_ip_address is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_sitemap_pinned_request_rewrites_url_and_preserves_host_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_request: dict[str, object] = {}
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        *,
+        headers: dict[str, str],
+        extensions: dict[str, object] | None = None,
+    ) -> httpx.Response:
+        del self
+        observed_request["url"] = url
+        observed_request["headers"] = headers
+        observed_request["extensions"] = extensions
+        request = httpx.Request("GET", url, headers=headers)
+        return httpx.Response(status_code=200, request=request, content=b"<urlset />")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.sitemap_fetcher.get_settings",
+        lambda: SimpleNamespace(OUTBOUND_HTTP_USER_AGENT="TestAgent/1.0"),
+    )
+
+    await fetch_sitemap(
+        "https://example.com:8443/sitemap.xml",
+        pinned_connect_ip="203.0.113.10",
+        max_retries=0,
+    )
+
+    assert observed_request["url"] == "https://203.0.113.10:8443/sitemap.xml"
+    assert (
+        cast(dict[str, str], observed_request["headers"])["Host"] == "example.com:8443"
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_sitemap_pinned_request_sets_sni_for_https_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_extensions: dict[str, object] | None = None
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        *,
+        headers: dict[str, str],
+        extensions: dict[str, object] | None = None,
+    ) -> httpx.Response:
+        del self, headers
+        nonlocal observed_extensions
+        observed_extensions = extensions
+        request = httpx.Request("GET", url)
+        return httpx.Response(status_code=200, request=request, content=b"<urlset />")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.sitemap_fetcher.get_settings",
+        lambda: SimpleNamespace(OUTBOUND_HTTP_USER_AGENT="TestAgent/1.0"),
+    )
+
+    await fetch_sitemap(
+        "https://example.com/sitemap.xml",
+        pinned_connect_ip="203.0.113.11",
+        max_retries=0,
+    )
+
+    assert observed_extensions == {"sni_hostname": "example.com"}
+
+
+@pytest.mark.asyncio
+async def test_fetch_sitemap_pinned_request_omits_sni_for_https_ip_literal_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_extensions: dict[str, object] | None = None
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        *,
+        headers: dict[str, str],
+        extensions: dict[str, object] | None = None,
+    ) -> httpx.Response:
+        del self, headers
+        nonlocal observed_extensions
+        observed_extensions = extensions
+        request = httpx.Request("GET", url)
+        return httpx.Response(status_code=200, request=request, content=b"<urlset />")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.sitemap_fetcher.get_settings",
+        lambda: SimpleNamespace(OUTBOUND_HTTP_USER_AGENT="TestAgent/1.0"),
+    )
+
+    await fetch_sitemap(
+        "https://93.184.216.34/sitemap.xml",
+        pinned_connect_ip="203.0.113.12",
+        max_retries=0,
+    )
+
+    assert observed_extensions == {}
+
+
+@pytest.mark.asyncio
+async def test_fetch_sitemap_pinned_request_formats_ipv6_target_and_host_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_request: dict[str, object] = {}
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        *,
+        headers: dict[str, str],
+        extensions: dict[str, object] | None = None,
+    ) -> httpx.Response:
+        del self, extensions
+        observed_request["url"] = url
+        observed_request["headers"] = headers
+        request = httpx.Request("GET", url, headers=headers)
+        return httpx.Response(status_code=200, request=request, content=b"<urlset />")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.sitemap_fetcher.get_settings",
+        lambda: SimpleNamespace(OUTBOUND_HTTP_USER_AGENT="TestAgent/1.0"),
+    )
+
+    await fetch_sitemap(
+        "https://[2001:db8::20]:9443/sitemap.xml",
+        pinned_connect_ip="2001:db8::10",
+        max_retries=0,
+    )
+
+    assert observed_request["url"] == "https://[2001:db8::10]:9443/sitemap.xml"
+    assert (
+        cast(dict[str, str], observed_request["headers"])["Host"]
+        == "[2001:db8::20]:9443"
+    )

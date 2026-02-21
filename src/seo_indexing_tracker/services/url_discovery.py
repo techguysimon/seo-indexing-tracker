@@ -23,7 +23,9 @@ from seo_indexing_tracker.models.sitemap import Sitemap, SitemapType
 from seo_indexing_tracker.models.url import URL
 from seo_indexing_tracker.services.sitemap_fetcher import (
     SitemapFetchError,
+    SitemapFetchNetworkError,
     SitemapFetchResult,
+    SitemapFetchTimeoutError,
     fetch_sitemap,
 )
 from seo_indexing_tracker.services.sitemap_index_parser import DEFAULT_MAX_DEPTH
@@ -66,7 +68,7 @@ class _SitemapDocument:
 
 @dataclass(slots=True, frozen=True)
 class _ChildSitemapFetchTarget:
-    pinned_connect_ip: str
+    pinned_connect_ips: tuple[str, ...]
 
 
 class URLDiscoveryProcessingError(Exception):
@@ -231,7 +233,7 @@ def _is_disallowed_ip_address(
 
 async def _resolve_host_ip_addresses(
     host_name: str,
-) -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+) -> tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]:
     loop = asyncio.get_running_loop()
     try:
         host_addresses = await loop.getaddrinfo(
@@ -244,14 +246,19 @@ async def _resolve_host_ip_addresses(
     except socket.gaierror as exc:
         raise ValueError("host_dns_resolution_failed") from exc
 
-    resolved_ip_addresses: set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()
+    resolved_ip_addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    seen_ip_addresses: set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()
     for _, _, _, _, sockaddr in host_addresses:
-        resolved_ip_addresses.add(ipaddress.ip_address(sockaddr[0]))
+        resolved_ip_address = ipaddress.ip_address(sockaddr[0])
+        if resolved_ip_address in seen_ip_addresses:
+            continue
+        seen_ip_addresses.add(resolved_ip_address)
+        resolved_ip_addresses.append(resolved_ip_address)
 
     if not resolved_ip_addresses:
         raise ValueError("host_dns_resolution_failed")
 
-    return resolved_ip_addresses
+    return tuple(resolved_ip_addresses)
 
 
 async def _resolve_child_sitemap_fetch_target(
@@ -265,21 +272,30 @@ async def _resolve_child_sitemap_fetch_target(
     if not host_name:
         raise ValueError("missing_host")
 
+    resolved_ip_addresses: tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]
     try:
-        resolved_ip_addresses = {ipaddress.ip_address(host_name)}
+        resolved_ip_addresses = (ipaddress.ip_address(host_name),)
     except ValueError:
         resolved_ip_addresses = await _resolve_host_ip_addresses(host_name)
 
-    for resolved_ip_address in sorted(resolved_ip_addresses, key=str):
+    validated_ip_addresses: list[str] = []
+    for resolved_ip_address in resolved_ip_addresses:
         if _is_disallowed_ip_address(resolved_ip_address):
             raise ValueError(
                 f"resolved_to_disallowed_ip:{resolved_ip_address.compressed}"
             )
+        validated_ip_addresses.append(resolved_ip_address.compressed)
 
-    selected_ip_address = sorted(resolved_ip_addresses, key=str)[0]
     return _ChildSitemapFetchTarget(
-        pinned_connect_ip=selected_ip_address.compressed,
+        pinned_connect_ips=tuple(validated_ip_addresses),
     )
+
+
+def _is_retryable_child_fetch_error(error: SitemapFetchError) -> bool:
+    if isinstance(error, (SitemapFetchNetworkError, SitemapFetchTimeoutError)):
+        return True
+
+    return isinstance(error.__cause__, (OSError, TimeoutError))
 
 
 def _validate_child_fetch_connect_destination(
@@ -357,22 +373,48 @@ class URLDiscoveryService:
                     reason=str(exc),
                 ) from exc
 
-            try:
-                fetch_result = await fetch_sitemap(
-                    current_child_url,
-                    follow_redirects=False,
-                    pinned_connect_ip=child_fetch_target.pinned_connect_ip,
-                )
-            except SitemapFetchError as exc:
+            fetch_result: SitemapFetchResult | None = None
+            last_fetch_error: SitemapFetchError | None = None
+            for pinned_connect_ip in child_fetch_target.pinned_connect_ips:
+                try:
+                    fetch_result = await fetch_sitemap(
+                        current_child_url,
+                        follow_redirects=False,
+                        pinned_connect_ip=pinned_connect_ip,
+                    )
+                except SitemapFetchError as exc:
+                    last_fetch_error = exc
+                    has_fallback_candidates = (
+                        pinned_connect_ip != child_fetch_target.pinned_connect_ips[-1]
+                    )
+                    if has_fallback_candidates and _is_retryable_child_fetch_error(exc):
+                        continue
+                    raise URLDiscoveryProcessingError(
+                        stage="fetch_child",
+                        website_id=root_sitemap.website_id,
+                        sitemap_id=root_sitemap.id,
+                        sitemap_url=child_sitemap_url,
+                        status_code=getattr(exc, "status_code", None),
+                        content_type=getattr(exc, "content_type", None),
+                        reason=exc.__class__.__name__,
+                    ) from exc
+
+                break
+
+            if fetch_result is None:
+                if last_fetch_error is None:
+                    raise RuntimeError(
+                        "child sitemap fetch failed without fetch result"
+                    )
                 raise URLDiscoveryProcessingError(
                     stage="fetch_child",
                     website_id=root_sitemap.website_id,
                     sitemap_id=root_sitemap.id,
                     sitemap_url=child_sitemap_url,
-                    status_code=getattr(exc, "status_code", None),
-                    content_type=getattr(exc, "content_type", None),
-                    reason=exc.__class__.__name__,
-                ) from exc
+                    status_code=getattr(last_fetch_error, "status_code", None),
+                    content_type=getattr(last_fetch_error, "content_type", None),
+                    reason=last_fetch_error.__class__.__name__,
+                ) from last_fetch_error
 
             try:
                 _validate_child_fetch_connect_destination(
