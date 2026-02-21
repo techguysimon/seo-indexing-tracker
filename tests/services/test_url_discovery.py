@@ -871,13 +871,20 @@ async def test_discover_urls_follows_allowed_child_redirect_chain(
         await session.flush()
         sitemap_id = sitemap.id
 
-    fetch_calls: list[tuple[str, bool]] = []
+    fetch_calls: list[tuple[str, bool, str | None]] = []
 
     async def fake_fetch_sitemap(
         url: str,
         **kwargs: str | bool | int | float | None,
     ) -> SitemapFetchResult:
-        fetch_calls.append((url, bool(kwargs.get("follow_redirects", True))))
+        pinned_connect_ip = kwargs.get("pinned_connect_ip")
+        fetch_calls.append(
+            (
+                url,
+                bool(kwargs.get("follow_redirects", True)),
+                pinned_connect_ip if isinstance(pinned_connect_ip, str) else None,
+            )
+        )
         if url == "https://example.com/root-index.xml":
             return _fetch_result(
                 content="""
@@ -919,6 +926,18 @@ async def test_discover_urls_follows_allowed_child_redirect_chain(
         fake_fetch_sitemap,
     )
 
+    async def fake_resolve_host_ip_addresses(
+        host_name: str,
+    ) -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+        if host_name == "example.com":
+            return {ipaddress.ip_address("93.184.216.34")}
+        raise AssertionError(f"Unexpected host resolution: {host_name}")
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.url_discovery._resolve_host_ip_addresses",
+        fake_resolve_host_ip_addresses,
+    )
+
     result = await URLDiscoveryService(session_factory=scoped_session).discover_urls(
         sitemap_id
     )
@@ -927,10 +946,12 @@ async def test_discover_urls_follows_allowed_child_redirect_chain(
     assert (
         "https://example.com/child-start.xml",
         False,
+        "93.184.216.34",
     ) in fetch_calls
     assert (
         "https://example.com/child-final.xml",
         False,
+        "93.184.216.34",
     ) in fetch_calls
 
     await engine.dispose()
@@ -1034,7 +1055,7 @@ async def test_discover_urls_blocks_disallowed_child_redirect_target(
     assert error_info.value.stage == "fetch_child_policy"
     assert error_info.value.sitemap_url == "https://example.com/child-start.xml"
     assert error_info.value.reason is not None
-    assert "redirect_target_disallowed" in error_info.value.reason
+    assert "resolved_to_disallowed_ip" in error_info.value.reason
 
     await engine.dispose()
 

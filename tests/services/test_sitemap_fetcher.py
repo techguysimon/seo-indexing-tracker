@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
@@ -26,7 +27,9 @@ async def test_fetch_sitemap_retries_forbidden_with_configured_user_agent(
         url: str,
         *,
         headers: dict[str, str],
+        extensions: dict[str, object] | None = None,
     ) -> httpx.Response:
+        del extensions
         request = httpx.Request("GET", url, headers=headers)
         request_headers.append(request.headers)
         if len(request_headers) == 1:
@@ -71,8 +74,9 @@ async def test_fetch_sitemap_accepts_already_decoded_xml_when_gzip_header_presen
         url: str,
         *,
         headers: dict[str, str],
+        extensions: dict[str, object] | None = None,
     ) -> httpx.Response:
-        del self, headers
+        del self, headers, extensions
         request = httpx.Request("GET", url)
         response = httpx.Response(
             status_code=200,
@@ -107,8 +111,9 @@ async def test_fetch_sitemap_decompresses_gzip_payload_when_magic_header_present
         url: str,
         *,
         headers: dict[str, str],
+        extensions: dict[str, object] | None = None,
     ) -> httpx.Response:
-        del self, headers
+        del self, headers, extensions
         request = httpx.Request("GET", url)
         return httpx.Response(
             status_code=200,
@@ -137,8 +142,9 @@ async def test_fetch_sitemap_raises_for_non_xml_non_gzip_payload_marked_gzip(
         url: str,
         *,
         headers: dict[str, str],
+        extensions: dict[str, object] | None = None,
     ) -> httpx.Response:
-        del self, headers
+        del self, headers, extensions
         request = httpx.Request("GET", url)
         response = httpx.Response(
             status_code=200,
@@ -170,8 +176,9 @@ async def test_fetch_sitemap_raises_for_corrupted_gzip_payload(
         url: str,
         *,
         headers: dict[str, str],
+        extensions: dict[str, object] | None = None,
     ) -> httpx.Response:
-        del self, headers
+        del self, headers, extensions
         request = httpx.Request("GET", url)
         return httpx.Response(
             status_code=200,
@@ -201,8 +208,9 @@ async def test_fetch_sitemap_accepts_xml_for_gz_suffix_when_payload_not_gzipped(
         url: str,
         *,
         headers: dict[str, str],
+        extensions: dict[str, object] | None = None,
     ) -> httpx.Response:
-        del self, headers
+        del self, headers, extensions
         request = httpx.Request("GET", url)
         return httpx.Response(
             status_code=200,
@@ -220,3 +228,84 @@ async def test_fetch_sitemap_accepts_xml_for_gz_suffix_when_payload_not_gzipped(
     result = await fetch_sitemap("https://example.com/sitemap.xml.gz", max_retries=0)
 
     assert result.content == xml_payload
+
+
+@pytest.mark.asyncio
+async def test_fetch_sitemap_extracts_peer_ip_address_from_network_stream_extensions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeSocket:
+        def getpeername(self) -> tuple[str, int]:
+            return ("203.0.113.20", 443)
+
+    class _FakeNetworkStream:
+        def get_extra_info(self, key: str) -> Any:
+            if key == "server_addr":
+                return ("203.0.113.10", 443)
+            if key == "peername":
+                return ("203.0.113.11", 443)
+            if key == "socket":
+                return _FakeSocket()
+            return None
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        *,
+        headers: dict[str, str],
+        extensions: dict[str, object] | None = None,
+    ) -> httpx.Response:
+        del self, headers, extensions
+        request = httpx.Request("GET", url)
+        return httpx.Response(
+            status_code=200,
+            request=request,
+            content=b"<urlset />",
+            extensions={"network_stream": _FakeNetworkStream()},
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.sitemap_fetcher.get_settings",
+        lambda: SimpleNamespace(OUTBOUND_HTTP_USER_AGENT="TestAgent/1.0"),
+    )
+
+    result = await fetch_sitemap("https://example.com/sitemap.xml", max_retries=0)
+
+    assert result.peer_ip_address == "203.0.113.10"
+
+
+@pytest.mark.asyncio
+async def test_fetch_sitemap_returns_none_when_peer_ip_metadata_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeNetworkStream:
+        def get_extra_info(self, key: str) -> None:
+            del key
+            return None
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        *,
+        headers: dict[str, str],
+        extensions: dict[str, object] | None = None,
+    ) -> httpx.Response:
+        del self, headers, extensions
+        request = httpx.Request("GET", url)
+        return httpx.Response(
+            status_code=200,
+            request=request,
+            content=b"<urlset />",
+            extensions={"network_stream": _FakeNetworkStream()},
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.sitemap_fetcher.get_settings",
+        lambda: SimpleNamespace(OUTBOUND_HTTP_USER_AGENT="TestAgent/1.0"),
+    )
+
+    result = await fetch_sitemap("https://example.com/sitemap.xml", max_retries=0)
+
+    assert result.peer_ip_address is None

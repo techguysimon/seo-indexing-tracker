@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import ipaddress
 import logging
 from typing import Any, Final, cast
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import httpx
 
@@ -86,6 +86,13 @@ class SitemapFetchDecompressionError(SitemapFetchError):
     """Raised when a fetched sitemap cannot be decompressed."""
 
 
+@dataclass(slots=True, frozen=True)
+class _PinnedRequestSettings:
+    request_url: str
+    host_header: str
+    request_extensions: dict[str, object]
+
+
 def _build_conditional_headers(
     etag: str | None, last_modified: str | None
 ) -> dict[str, str]:
@@ -110,6 +117,95 @@ def _sanitize_sitemap_url(url: str) -> str:
     path = split_url.path or "/"
     sanitized = f"{host}{path}".strip()
     return sanitized or "sitemap"
+
+
+def _is_ip_literal(host_name: str) -> bool:
+    try:
+        ipaddress.ip_address(host_name)
+    except ValueError:
+        return False
+    return True
+
+
+def _format_host_component(host_name: str) -> str:
+    if ":" in host_name and not host_name.startswith("["):
+        return f"[{host_name}]"
+    return host_name
+
+
+def _default_port_for_scheme(scheme: str) -> int | None:
+    if scheme == "http":
+        return 80
+    if scheme == "https":
+        return 443
+    return None
+
+
+def _build_host_header(*, scheme: str, host_name: str, port: int | None) -> str:
+    formatted_host = _format_host_component(host_name)
+    default_port = _default_port_for_scheme(scheme)
+    if port is None or port == default_port:
+        return formatted_host
+    return f"{formatted_host}:{port}"
+
+
+def _replace_url_host(split_url: SplitResult, *, host_name: str) -> str:
+    formatted_host = _format_host_component(host_name)
+    user_info = ""
+    if split_url.username is not None:
+        user_info = split_url.username
+        if split_url.password is not None:
+            user_info = f"{user_info}:{split_url.password}"
+
+    netloc = formatted_host
+    if split_url.port is not None:
+        netloc = f"{netloc}:{split_url.port}"
+    if user_info:
+        netloc = f"{user_info}@{netloc}"
+
+    return urlunsplit(
+        (
+            split_url.scheme,
+            netloc,
+            split_url.path,
+            split_url.query,
+            split_url.fragment,
+        )
+    )
+
+
+def _build_pinned_request_settings(
+    *,
+    url: str,
+    pinned_connect_ip: str,
+) -> _PinnedRequestSettings:
+    parsed_url = urlsplit(url)
+    scheme = parsed_url.scheme.lower()
+    host_name = parsed_url.hostname
+    if host_name is None:
+        raise ValueError("pinned_request_missing_host")
+
+    try:
+        parsed_pinned_connect_ip = ipaddress.ip_address(pinned_connect_ip)
+    except ValueError as exc:
+        raise ValueError("pinned_request_invalid_ip") from exc
+
+    request_extensions: dict[str, object] = {}
+    if scheme == "https" and not _is_ip_literal(host_name):
+        request_extensions["sni_hostname"] = host_name
+
+    return _PinnedRequestSettings(
+        request_url=_replace_url_host(
+            parsed_url,
+            host_name=parsed_pinned_connect_ip.compressed,
+        ),
+        host_header=_build_host_header(
+            scheme=scheme,
+            host_name=host_name,
+            port=parsed_url.port,
+        ),
+        request_extensions=request_extensions,
+    )
 
 
 def _extract_ip_address_from_peer_address(peer_address: object) -> str | None:
@@ -173,13 +269,22 @@ async def _get_sitemap_with_403_retry(
     url: str,
     conditional_headers: dict[str, str],
     user_agent: str,
+    host_header: str | None = None,
+    request_extensions: dict[str, object] | None = None,
 ) -> httpx.Response:
     primary_headers = {
         "User-Agent": user_agent,
         **PRIMARY_BROWSER_HEADERS,
         **conditional_headers,
     }
-    response = await client.get(url, headers=primary_headers)
+    if host_header is not None:
+        primary_headers["Host"] = host_header
+
+    response = await client.get(
+        url,
+        headers=primary_headers,
+        extensions=request_extensions,
+    )
     if response.status_code != httpx.codes.FORBIDDEN:
         return response
 
@@ -188,7 +293,14 @@ async def _get_sitemap_with_403_retry(
         **ALTERNATE_BROWSER_HEADERS,
         **conditional_headers,
     }
-    return await client.get(url, headers=alternate_headers)
+    if host_header is not None:
+        alternate_headers["Host"] = host_header
+
+    return await client.get(
+        url,
+        headers=alternate_headers,
+        extensions=request_extensions,
+    )
 
 
 async def fetch_sitemap(
@@ -202,6 +314,7 @@ async def fetch_sitemap(
     backoff_base_seconds: float = DEFAULT_BACKOFF_BASE_SECONDS,
     user_agent: str | None = None,
     follow_redirects: bool = True,
+    pinned_connect_ip: str | None = None,
 ) -> SitemapFetchResult:
     """Fetch a sitemap URL asynchronously with retries and conditional headers."""
 
@@ -220,6 +333,19 @@ async def fetch_sitemap(
     headers = _build_conditional_headers(etag=etag, last_modified=last_modified)
     timeout = httpx.Timeout(timeout_seconds)
     request_user_agent = user_agent or get_settings().OUTBOUND_HTTP_USER_AGENT
+    pinned_request_settings = (
+        _build_pinned_request_settings(
+            url=url,
+            pinned_connect_ip=pinned_connect_ip,
+        )
+        if pinned_connect_ip is not None
+        else None
+    )
+    request_url = (
+        pinned_request_settings.request_url
+        if pinned_request_settings is not None
+        else url
+    )
 
     async with httpx.AsyncClient(
         timeout=timeout,
@@ -230,9 +356,23 @@ async def fetch_sitemap(
             try:
                 response = await _get_sitemap_with_403_retry(
                     client=client,
-                    url=url,
+                    url=request_url,
                     conditional_headers=headers,
                     user_agent=request_user_agent,
+                    host_header=(
+                        pinned_request_settings.host_header
+                        if pinned_request_settings is not None
+                        else None
+                    ),
+                    request_extensions=(
+                        pinned_request_settings.request_extensions
+                        if pinned_request_settings is not None
+                        else None
+                    ),
+                )
+
+                response_url = (
+                    str(response.url) if pinned_request_settings is None else url
                 )
 
                 if response.status_code == httpx.codes.NOT_MODIFIED:
@@ -242,7 +382,7 @@ async def fetch_sitemap(
                         last_modified=response.headers.get("last-modified"),
                         status_code=response.status_code,
                         content_type=response.headers.get("content-type"),
-                        url=str(response.url),
+                        url=response_url,
                         not_modified=True,
                         redirect_location=response.headers.get("location"),
                         peer_ip_address=_extract_peer_ip_address(response),
@@ -276,7 +416,7 @@ async def fetch_sitemap(
                     last_modified=response.headers.get("last-modified"),
                     status_code=response.status_code,
                     content_type=response.headers.get("content-type"),
-                    url=str(response.url),
+                    url=response_url,
                     not_modified=False,
                     redirect_location=response.headers.get("location"),
                     peer_ip_address=_extract_peer_ip_address(response),

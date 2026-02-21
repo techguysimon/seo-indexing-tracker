@@ -64,6 +64,11 @@ class _SitemapDocument:
     content_type: str | None
 
 
+@dataclass(slots=True, frozen=True)
+class _ChildSitemapFetchTarget:
+    pinned_connect_ip: str
+
+
 class URLDiscoveryProcessingError(Exception):
     """Raised when URL discovery fails during parse or persistence."""
 
@@ -249,7 +254,9 @@ async def _resolve_host_ip_addresses(
     return resolved_ip_addresses
 
 
-async def _validate_child_sitemap_url_for_fetch(child_sitemap_url: str) -> None:
+async def _resolve_child_sitemap_fetch_target(
+    child_sitemap_url: str,
+) -> _ChildSitemapFetchTarget:
     parsed_child_sitemap_url = urlsplit(child_sitemap_url.strip())
     if parsed_child_sitemap_url.scheme.lower() not in {"http", "https"}:
         raise ValueError("unsupported_scheme")
@@ -268,6 +275,11 @@ async def _validate_child_sitemap_url_for_fetch(child_sitemap_url: str) -> None:
             raise ValueError(
                 f"resolved_to_disallowed_ip:{resolved_ip_address.compressed}"
             )
+
+    selected_ip_address = sorted(resolved_ip_addresses, key=str)[0]
+    return _ChildSitemapFetchTarget(
+        pinned_connect_ip=selected_ip_address.compressed,
+    )
 
 
 def _validate_child_fetch_connect_destination(
@@ -333,7 +345,9 @@ class URLDiscoveryService:
 
         while True:
             try:
-                await _validate_child_sitemap_url_for_fetch(current_child_url)
+                child_fetch_target = await _resolve_child_sitemap_fetch_target(
+                    current_child_url
+                )
             except ValueError as exc:
                 raise URLDiscoveryProcessingError(
                     stage="fetch_child_policy",
@@ -347,6 +361,7 @@ class URLDiscoveryService:
                 fetch_result = await fetch_sitemap(
                     current_child_url,
                     follow_redirects=False,
+                    pinned_connect_ip=child_fetch_target.pinned_connect_ip,
                 )
             except SitemapFetchError as exc:
                 raise URLDiscoveryProcessingError(
@@ -401,22 +416,6 @@ class URLDiscoveryService:
                 )
 
             redirect_target_url = urljoin(fetch_result.url, redirect_location)
-            try:
-                await _validate_child_sitemap_url_for_fetch(redirect_target_url)
-            except ValueError as exc:
-                raise URLDiscoveryProcessingError(
-                    stage="fetch_child_policy",
-                    website_id=root_sitemap.website_id,
-                    sitemap_id=root_sitemap.id,
-                    sitemap_url=child_sitemap_url,
-                    status_code=fetch_result.status_code,
-                    content_type=fetch_result.content_type,
-                    reason=(
-                        "redirect_target_disallowed:"
-                        f"{_sanitize_sitemap_url(redirect_target_url)}:{exc}"
-                    ),
-                ) from exc
-
             current_child_url = redirect_target_url
             redirect_hops += 1
 
