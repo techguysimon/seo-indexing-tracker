@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Uuid, func, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum as SqlEnum,
+    Float,
+    Integer,
+    String,
+    Uuid,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from seo_indexing_tracker.models.base import Base
@@ -17,6 +28,16 @@ if TYPE_CHECKING:
     from seo_indexing_tracker.models.service_account import ServiceAccount
     from seo_indexing_tracker.models.sitemap import Sitemap
     from seo_indexing_tracker.models.url import URL
+
+
+class QuotaDiscoveryStatus(str, Enum):
+    """Discovery lifecycle for website quota estimation."""
+
+    PENDING = "pending"
+    DISCOVERING = "discovering"
+    ESTIMATED = "estimated"
+    CONFIRMED = "confirmed"
+    FAILED = "failed"
 
 
 class Website(Base):
@@ -67,6 +88,28 @@ class Website(Base):
         default=True,
         server_default=text("1"),
     )
+    discovered_indexing_quota: Mapped[int | None] = mapped_column(Integer)
+    discovered_inspection_quota: Mapped[int | None] = mapped_column(Integer)
+    quota_discovery_status: Mapped[QuotaDiscoveryStatus] = mapped_column(
+        SqlEnum(
+            QuotaDiscoveryStatus,
+            name="quota_discovery_status",
+            values_callable=lambda enum: [member.value for member in enum],
+        ),
+        nullable=False,
+        default=QuotaDiscoveryStatus.PENDING,
+        server_default=QuotaDiscoveryStatus.PENDING.value,
+    )
+    quota_discovery_confidence: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=0.0,
+        server_default=text("0"),
+    )
+    quota_discovered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    quota_last_429_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     service_account: Mapped[ServiceAccount | None] = relationship(
         back_populates="website",
@@ -94,4 +137,4 @@ class Website(Base):
     )
 
 
-__all__ = ["Website"]
+__all__ = ["QuotaDiscoveryStatus", "Website"]

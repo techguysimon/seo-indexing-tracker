@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import NoReturn
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
+from seo_indexing_tracker.database import get_db_session
+from seo_indexing_tracker.models import JobExecution
 from seo_indexing_tracker.services.processing_pipeline import (
     JobExecutionMetrics,
     SchedulerProcessingPipelineService,
@@ -49,6 +54,29 @@ class SchedulerJobMonitoringResponse(BaseModel):
     last_finished_at: datetime | None
     last_duration_ms: float | None
     last_error: str | None
+
+
+class JobExecutionHistoryItem(BaseModel):
+    """Persisted scheduler job execution item."""
+
+    job_id: str
+    job_name: str
+    website_id: UUID | None
+    started_at: datetime
+    finished_at: datetime | None
+    status: str
+    urls_processed: int
+    error_message: str | None
+
+
+class JobExecutionHistoryResponse(BaseModel):
+    """Paginated scheduler job execution history payload."""
+
+    page: int
+    page_size: int
+    total_items: int
+    total_pages: int
+    items: list[JobExecutionHistoryItem]
 
 
 def _get_scheduler_service(request: Request) -> SchedulerService:
@@ -200,6 +228,78 @@ async def list_scheduler_job_monitoring(
         _job_monitoring_response(metrics)
         for metrics in pipeline_service.monitoring_snapshot()
     ]
+
+
+@router.get(
+    "/jobs/history",
+    response_model=JobExecutionHistoryResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def list_scheduler_job_history(
+    page: int = 1,
+    page_size: int = 20,
+    job_id: str | None = None,
+    website_id: UUID | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    session: AsyncSession = Depends(get_db_session),
+) -> JobExecutionHistoryResponse:
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 1), 100)
+
+    statement = select(JobExecution)
+    if job_id:
+        statement = statement.where(JobExecution.job_id == job_id.strip())
+    if website_id is not None:
+        statement = statement.where(JobExecution.website_id == website_id)
+    if status_filter:
+        statement = statement.where(
+            JobExecution.status == status_filter.strip().lower()
+        )
+    if date_from is not None:
+        statement = statement.where(JobExecution.started_at >= date_from)
+    if date_to is not None:
+        statement = statement.where(JobExecution.started_at <= date_to)
+
+    total_items = int(
+        (await session.scalar(select(func.count()).select_from(statement.subquery())))
+        or 0
+    )
+    total_pages = max(1, ((total_items - 1) // safe_page_size) + 1)
+    bounded_page = min(safe_page, total_pages)
+
+    rows = (
+        (
+            await session.execute(
+                statement.order_by(JobExecution.started_at.desc())
+                .offset((bounded_page - 1) * safe_page_size)
+                .limit(safe_page_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return JobExecutionHistoryResponse(
+        page=bounded_page,
+        page_size=safe_page_size,
+        total_items=total_items,
+        total_pages=total_pages,
+        items=[
+            JobExecutionHistoryItem(
+                job_id=row.job_id,
+                job_name=row.job_name,
+                website_id=row.website_id,
+                started_at=row.started_at,
+                finished_at=row.finished_at,
+                status=row.status,
+                urls_processed=row.urls_processed,
+                error_message=row.error_message,
+            )
+            for row in rows
+        ],
+    )
 
 
 @router.post(

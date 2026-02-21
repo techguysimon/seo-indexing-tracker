@@ -23,10 +23,12 @@ from seo_indexing_tracker.services.config_validation import (
     ConfigurationValidationError,
     ConfigurationValidationService,
 )
+from seo_indexing_tracker.services.activity_service import ActivityService
 
 router = APIRouter(prefix="/api", tags=["sitemaps"])
 
 config_validation_service = ConfigurationValidationService()
+activity_service = ActivityService()
 
 
 async def _ensure_website_exists(*, website_id: UUID, session: AsyncSession) -> None:
@@ -124,6 +126,16 @@ async def create_sitemap(
             detail="Sitemap already exists for this website",
         ) from error
 
+    await activity_service.log_activity(
+        session=session,
+        event_type="sitemap_added",
+        website_id=website_id,
+        resource_type="sitemap",
+        resource_id=sitemap.id,
+        message=f"Sitemap added: {sitemap.url}",
+        metadata={"sitemap_type": sitemap.sitemap_type.value},
+    )
+
     return await _get_sitemap_or_404(sitemap_id=sitemap.id, session=session)
 
 
@@ -203,6 +215,15 @@ async def delete_sitemap(
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     sitemap = await _get_sitemap_or_404(sitemap_id=sitemap_id, session=session)
+    await activity_service.log_activity(
+        session=session,
+        event_type="sitemap_removed",
+        website_id=sitemap.website_id,
+        resource_type="sitemap",
+        resource_id=sitemap.id,
+        message=f"Sitemap removed: {sitemap.url}",
+        metadata={"sitemap_type": sitemap.sitemap_type.value},
+    )
     await session.delete(sitemap)
     await session.flush()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

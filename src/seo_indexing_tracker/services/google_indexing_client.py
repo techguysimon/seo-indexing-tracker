@@ -8,8 +8,10 @@ import logging
 from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import urlparse
+from uuid import UUID
 
 from googleapiclient.discovery import build  # type: ignore[import-untyped]
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from seo_indexing_tracker.services.google_credentials import (
     GoogleCredentialsError,
@@ -22,6 +24,7 @@ from seo_indexing_tracker.services.google_errors import (
     QuotaExceededError,
     execute_with_google_retry,
 )
+from seo_indexing_tracker.services.quota_discovery_service import QuotaDiscoveryService
 
 INDEXING_SCOPE = "https://www.googleapis.com/auth/indexing"
 ALLOWED_NOTIFICATION_ACTIONS = frozenset({"URL_UPDATED", "URL_DELETED"})
@@ -40,6 +43,7 @@ class IndexingURLResult:
     metadata: dict[str, Any] | None
     error_code: str | None
     error_message: str | None
+    retry_after_seconds: int | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -63,6 +67,7 @@ class MetadataLookupResult:
     metadata: dict[str, Any] | None
     error_code: str | None
     error_message: str | None
+    retry_after_seconds: int | None
 
 
 class _GoogleBuildCallable(Protocol):
@@ -146,6 +151,7 @@ class GoogleIndexingClient:
         http_status: int | None,
         error_code: str,
         error_message: str,
+        retry_after_seconds: int | None = None,
     ) -> IndexingURLResult:
         return IndexingURLResult(
             url=url,
@@ -155,6 +161,7 @@ class GoogleIndexingClient:
             metadata=None,
             error_code=error_code,
             error_message=error_message,
+            retry_after_seconds=retry_after_seconds,
         )
 
     def submit_url_sync(
@@ -173,6 +180,7 @@ class GoogleIndexingClient:
                 details=None,
                 operation="urlNotifications.publish",
                 service="indexing",
+                retry_after_seconds=None,
             )
             _LOGGER.warning(
                 "google_api_invalid_url",
@@ -211,6 +219,7 @@ class GoogleIndexingClient:
                 metadata=metadata,
                 error_code=None,
                 error_message=None,
+                retry_after_seconds=None,
             )
         except GoogleAPIError as error:
             return self._submission_error_result(
@@ -219,6 +228,7 @@ class GoogleIndexingClient:
                 http_status=error.status_code,
                 error_code=_error_code_for_google_api_error(error),
                 error_message=error.message,
+                retry_after_seconds=error.retry_after_seconds,
             )
         except GoogleCredentialsError as error:
             _LOGGER.error(
@@ -235,16 +245,28 @@ class GoogleIndexingClient:
                 http_status=None,
                 error_code="AUTH_ERROR",
                 error_message=str(error),
+                retry_after_seconds=None,
             )
 
     async def submit_url(
         self,
         url: str,
         action: str = "URL_UPDATED",
+        *,
+        website_id: UUID | None = None,
+        session: AsyncSession | None = None,
+        quota_discovery_service: QuotaDiscoveryService | None = None,
     ) -> IndexingURLResult:
         """Async wrapper for submitting a single URL."""
 
-        return await asyncio.to_thread(self.submit_url_sync, url, action)
+        result = await asyncio.to_thread(self.submit_url_sync, url, action)
+        await self._record_quota_observation(
+            result=result,
+            website_id=website_id,
+            session=session,
+            quota_discovery_service=quota_discovery_service,
+        )
+        return result
 
     def batch_submit_sync(
         self,
@@ -277,10 +299,22 @@ class GoogleIndexingClient:
         self,
         urls: list[str] | tuple[str, ...],
         action: str = "URL_UPDATED",
+        *,
+        website_id: UUID | None = None,
+        session: AsyncSession | None = None,
+        quota_discovery_service: QuotaDiscoveryService | None = None,
     ) -> BatchSubmitResult:
         """Async wrapper for batch URL submission."""
 
-        return await asyncio.to_thread(self.batch_submit_sync, urls, action)
+        batch_result = await asyncio.to_thread(self.batch_submit_sync, urls, action)
+        for result in batch_result.results:
+            await self._record_quota_observation(
+                result=result,
+                website_id=website_id,
+                session=session,
+                quota_discovery_service=quota_discovery_service,
+            )
+        return batch_result
 
     def get_metadata_sync(self, url: str) -> MetadataLookupResult:
         """Fetch URL notification metadata from the Google Indexing API."""
@@ -293,6 +327,7 @@ class GoogleIndexingClient:
                 details=None,
                 operation="urlNotifications.getMetadata",
                 service="indexing",
+                retry_after_seconds=None,
             )
             _LOGGER.warning(
                 "google_api_invalid_url",
@@ -309,6 +344,7 @@ class GoogleIndexingClient:
                 metadata=None,
                 error_code="INVALID_URL",
                 error_message=validation_error.message,
+                retry_after_seconds=None,
             )
 
         try:
@@ -329,6 +365,7 @@ class GoogleIndexingClient:
                 metadata=response,
                 error_code=None,
                 error_message=None,
+                retry_after_seconds=None,
             )
         except GoogleAPIError as error:
             return MetadataLookupResult(
@@ -338,6 +375,7 @@ class GoogleIndexingClient:
                 metadata=None,
                 error_code=_error_code_for_google_api_error(error),
                 error_message=error.message,
+                retry_after_seconds=error.retry_after_seconds,
             )
         except GoogleCredentialsError as error:
             _LOGGER.error(
@@ -355,12 +393,54 @@ class GoogleIndexingClient:
                 metadata=None,
                 error_code="AUTH_ERROR",
                 error_message=str(error),
+                retry_after_seconds=None,
             )
 
-    async def get_metadata(self, url: str) -> MetadataLookupResult:
+    async def get_metadata(
+        self,
+        url: str,
+        *,
+        website_id: UUID | None = None,
+        session: AsyncSession | None = None,
+        quota_discovery_service: QuotaDiscoveryService | None = None,
+    ) -> MetadataLookupResult:
         """Async wrapper for URL notification metadata lookup."""
 
-        return await asyncio.to_thread(self.get_metadata_sync, url)
+        result = await asyncio.to_thread(self.get_metadata_sync, url)
+        await self._record_quota_observation(
+            result=result,
+            website_id=website_id,
+            session=session,
+            quota_discovery_service=quota_discovery_service,
+        )
+        return result
+
+    async def _record_quota_observation(
+        self,
+        *,
+        result: IndexingURLResult | MetadataLookupResult,
+        website_id: UUID | None,
+        session: AsyncSession | None,
+        quota_discovery_service: QuotaDiscoveryService | None,
+    ) -> None:
+        if website_id is None or session is None:
+            return
+
+        discovery_service = quota_discovery_service or QuotaDiscoveryService()
+        if result.http_status == 429:
+            await discovery_service.record_429(
+                session=session,
+                website_id=website_id,
+                api_type="indexing",
+                retry_after_seconds=result.retry_after_seconds,
+            )
+            return
+        if result.success:
+            await discovery_service.record_success(
+                session=session,
+                website_id=website_id,
+                api_type="indexing",
+            )
 
 
 __all__ = [

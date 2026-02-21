@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -12,10 +13,12 @@ from typing import Any, Protocol, cast
 from uuid import UUID
 
 from sqlalchemy import func, insert, nullsfirst, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from seo_indexing_tracker.config import Settings
 from seo_indexing_tracker.database import session_scope
 from seo_indexing_tracker.models import (
+    JobExecution,
     IndexStatus,
     IndexVerdict,
     ServiceAccount,
@@ -23,6 +26,7 @@ from seo_indexing_tracker.models import (
     URL,
     Website,
 )
+from seo_indexing_tracker.services.activity_service import ActivityService
 from seo_indexing_tracker.services.batch_processor import BatchProcessorService
 from seo_indexing_tracker.services.google_api_factory import (
     WebsiteGoogleAPIClients,
@@ -65,6 +69,15 @@ class JobExecutionMetrics:
 
 
 @dataclass(slots=True, frozen=True)
+class JobRunResult:
+    """Normalized result metadata persisted to job execution history."""
+
+    summary: dict[str, int]
+    urls_processed: int
+    checkpoint_data: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class _WebsiteCredentials:
     website_id: UUID
     credentials_path: str
@@ -78,7 +91,14 @@ class _VerificationCandidate:
 
 
 class _InspectionClient(Protocol):
-    async def inspect_url(self, url: str, site_url: str) -> IndexStatusResult: ...
+    async def inspect_url(
+        self,
+        url: str,
+        site_url: str,
+        *,
+        website_id: UUID | None = None,
+        session: AsyncSession | None = None,
+    ) -> IndexStatusResult: ...
 
 
 class _MappedGoogleClientFactory:
@@ -122,6 +142,7 @@ class _OverlapProtectedRunner:
     def __init__(self) -> None:
         self._locks: dict[str, asyncio.Lock] = {}
         self._metrics: dict[str, JobExecutionMetrics] = {}
+        self._activity_service = ActivityService()
 
     def register(self, *, job_id: str, name: str) -> None:
         self._locks.setdefault(job_id, asyncio.Lock())
@@ -149,7 +170,7 @@ class _OverlapProtectedRunner:
         self,
         *,
         job_id: str,
-        run: Callable[[], Awaitable[dict[str, int]]],
+        run: Callable[[UUID], Awaitable[JobRunResult]],
     ) -> None:
         lock = self._locks[job_id]
         metrics = self._metrics[job_id]
@@ -165,14 +186,27 @@ class _OverlapProtectedRunner:
             metrics.running = True
             metrics.last_started_at = datetime.now(UTC)
             started_at = perf_counter()
+            execution_id = await self._start_job_execution(
+                job_id=job_id, metrics=metrics
+            )
 
             try:
-                job_summary = await run()
+                job_result = await self._invoke_job_run(
+                    run=run,
+                    execution_id=execution_id,
+                )
                 metrics.successful_runs += 1
                 metrics.last_error = None
                 _job_logger.info(
                     "scheduler_pipeline_job_completed",
-                    extra={"job_id": job_id, **job_summary},
+                    extra={"job_id": job_id, **job_result.summary},
+                )
+                await self._finish_job_execution(
+                    execution_id=execution_id,
+                    status="success",
+                    urls_processed=job_result.urls_processed,
+                    checkpoint_data=job_result.checkpoint_data,
+                    error_message=None,
                 )
             except Exception as error:
                 metrics.failed_runs += 1
@@ -181,12 +215,128 @@ class _OverlapProtectedRunner:
                     "scheduler_pipeline_job_failed",
                     extra={"job_id": job_id},
                 )
+                await self._finish_job_execution(
+                    execution_id=execution_id,
+                    status="failed",
+                    urls_processed=None,
+                    checkpoint_data=None,
+                    error_message=str(error),
+                )
             finally:
                 metrics.running = False
                 metrics.last_finished_at = datetime.now(UTC)
                 metrics.last_duration_ms = round(
                     (perf_counter() - started_at) * 1000, 2
                 )
+
+    async def _start_job_execution(
+        self,
+        *,
+        job_id: str,
+        metrics: JobExecutionMetrics,
+    ) -> UUID:
+        execution = JobExecution(
+            job_id=job_id,
+            job_name=metrics.name,
+            status="running",
+            checkpoint_data={"stage": "started", "job_id": job_id},
+        )
+        async with session_scope() as session:
+            session.add(execution)
+            await session.flush()
+            await self._activity_service.log_activity(
+                session=session,
+                event_type="job_started",
+                website_id=None,
+                resource_type="job",
+                resource_id=execution.id,
+                message=f"{metrics.name} started",
+                metadata={"job_id": job_id, "job_execution_id": str(execution.id)},
+            )
+            return execution.id
+
+    async def _finish_job_execution(
+        self,
+        *,
+        execution_id: UUID,
+        status: str,
+        urls_processed: int | None,
+        checkpoint_data: dict[str, Any] | None,
+        error_message: str | None,
+    ) -> None:
+        finished_at = datetime.now(UTC)
+        async with session_scope() as session:
+            execution = await session.get(JobExecution, execution_id)
+            if execution is None:
+                return
+            execution.status = status
+            execution.finished_at = finished_at
+            if urls_processed is not None:
+                execution.urls_processed = urls_processed
+            if checkpoint_data is not None:
+                execution.checkpoint_data = checkpoint_data
+            execution.error_message = error_message
+            await session.flush()
+            await self._activity_service.log_activity(
+                session=session,
+                event_type="job_completed",
+                website_id=execution.website_id,
+                resource_type="job",
+                resource_id=execution.id,
+                message=f"{execution.job_name} {status}",
+                metadata={
+                    "job_id": execution.job_id,
+                    "job_execution_id": str(execution.id),
+                    "status": status,
+                    "urls_processed": execution.urls_processed,
+                    "error_message": error_message,
+                },
+            )
+
+    async def persist_checkpoint(
+        self,
+        *,
+        execution_id: UUID,
+        checkpoint_data: dict[str, Any],
+        urls_processed: int,
+    ) -> None:
+        async with session_scope() as session:
+            execution = await session.get(JobExecution, execution_id)
+            if execution is None:
+                return
+            execution.checkpoint_data = checkpoint_data
+            execution.urls_processed = urls_processed
+
+    async def _invoke_job_run(
+        self,
+        *,
+        run: Callable[[UUID], Awaitable[JobRunResult]],
+        execution_id: UUID,
+    ) -> JobRunResult:
+        parameter_count: int | None = None
+        try:
+            parameter_count = len(inspect.signature(run).parameters)
+        except (TypeError, ValueError):
+            parameter_count = None
+
+        if parameter_count == 0:
+            legacy_result = await cast(Any, run)()
+            if isinstance(legacy_result, JobRunResult):
+                return legacy_result
+            if isinstance(legacy_result, dict):
+                urls_processed = int(
+                    legacy_result.get("dequeued_urls")
+                    or legacy_result.get("inspected_urls")
+                    or legacy_result.get("discovered_urls")
+                    or 0
+                )
+                return JobRunResult(
+                    summary=cast(dict[str, int], legacy_result),
+                    urls_processed=urls_processed,
+                )
+            raise RuntimeError("Legacy scheduler job returned unexpected payload")
+
+        return await run(execution_id)
 
 
 class SchedulerProcessingPipelineService:
@@ -215,6 +365,7 @@ class SchedulerProcessingPipelineService:
             client_factory=cast(Any, self._client_factory),
             rate_limiter=self._rate_limiter,
         )
+        self._activity_service = ActivityService()
         self._runner = _OverlapProtectedRunner()
 
     def register_jobs(self) -> None:
@@ -265,34 +416,106 @@ class SchedulerProcessingPipelineService:
             run=self._refresh_sitemaps,
         )
 
-    async def _submit_urls(self) -> dict[str, int]:
+    async def _submit_urls(self, execution_id: UUID) -> JobRunResult:
         website_credentials = await self._list_websites_with_credentials(
             requires_queued_urls=True
         )
         processed_websites = 0
         dequeued_urls = 0
         failed_urls = 0
+        last_checkpoint_data: dict[str, Any] | None = {
+            "job_id": URL_SUBMISSION_JOB_ID,
+            "stage": "initialized",
+            "processed_websites": 0,
+            "urls_processed": 0,
+        }
+
+        async def persist_batch_checkpoint(
+            website_id: UUID,
+            checkpoint_data: dict[str, Any] | None,
+        ) -> None:
+            nonlocal last_checkpoint_data
+            if checkpoint_data is None:
+                return
+
+            urls_processed = int(checkpoint_data.get("processed_urls", 0))
+            payload = {
+                "job_id": URL_SUBMISSION_JOB_ID,
+                "stage": "submit",
+                "website_id": str(website_id),
+                "processed_websites": processed_websites,
+                "urls_processed": dequeued_urls + urls_processed,
+                "batch_checkpoint": checkpoint_data,
+            }
+            last_checkpoint_data = payload
+            await self._runner.persist_checkpoint(
+                execution_id=execution_id,
+                checkpoint_data=payload,
+                urls_processed=dequeued_urls + urls_processed,
+            )
 
         for website in website_credentials:
             self._client_factory.register_website(
                 website_id=website.website_id,
                 credentials_path=website.credentials_path,
             )
+
+            async def progress_callback(update: Any) -> None:
+                await persist_batch_checkpoint(
+                    website_id=website.website_id,
+                    checkpoint_data=getattr(update, "checkpoint_data", None),
+                )
+
             result = await self._batch_processor.process_batch(
                 website.website_id,
                 requested_urls=self._settings.SCHEDULER_URL_SUBMISSION_BATCH_SIZE,
+                progress_callback=progress_callback,
             )
             processed_websites += 1
             dequeued_urls += result.dequeued_urls
             failed_urls += result.submission_failure_count
+            await self._log_activity(
+                event_type="url_submitted",
+                website_id=website.website_id,
+                resource_type="website",
+                resource_id=website.website_id,
+                message=(
+                    f"Submitted {result.submission_success_count} URLs "
+                    f"for website {website.website_id}"
+                ),
+                metadata={
+                    "dequeued_urls": result.dequeued_urls,
+                    "submitted_urls": result.submitted_urls,
+                    "submission_failures": result.submission_failure_count,
+                },
+            )
 
-        return {
+            last_checkpoint_data = {
+                "job_id": URL_SUBMISSION_JOB_ID,
+                "stage": "submit",
+                "website_id": str(website.website_id),
+                "processed_websites": processed_websites,
+                "urls_processed": dequeued_urls,
+            }
+            await self._runner.persist_checkpoint(
+                execution_id=execution_id,
+                checkpoint_data=last_checkpoint_data,
+                urls_processed=dequeued_urls,
+            )
+
+        summary = {
             "processed_websites": processed_websites,
             "dequeued_urls": dequeued_urls,
             "failed_urls": failed_urls,
         }
+        return JobRunResult(
+            summary=summary,
+            urls_processed=dequeued_urls,
+            checkpoint_data=last_checkpoint_data,
+        )
 
-    async def _verify_index_statuses(self) -> dict[str, int]:
+    async def _verify_index_statuses(self, execution_id: UUID) -> JobRunResult:
+        del execution_id
         website_credentials = await self._list_websites_with_credentials(
             requires_queued_urls=False
         )
@@ -328,17 +551,32 @@ class SchedulerProcessingPipelineService:
             async with session_scope() as session:
                 await session.execute(insert(IndexStatus), inspection_rows)
 
-        return {
+        summary = {
             "processed_websites": len(website_credentials),
             "inspected_urls": inspected_urls,
             "failed_urls": failed_urls,
         }
+        return JobRunResult(
+            summary=summary,
+            urls_processed=inspected_urls,
+            checkpoint_data={
+                "job_id": INDEX_VERIFICATION_JOB_ID,
+                "processed_websites": len(website_credentials),
+                "urls_processed": inspected_urls,
+            },
+        )
 
-    async def _refresh_sitemaps(self) -> dict[str, int]:
+    async def _refresh_sitemaps(self, execution_id: UUID) -> JobRunResult:
         sitemap_ids = await self._list_active_sitemap_ids()
         refreshed_sitemaps = 0
         discovered_urls = 0
         requeued_urls = 0
+        last_checkpoint_data: dict[str, Any] | None = {
+            "job_id": SITEMAP_REFRESH_JOB_ID,
+            "stage": "initialized",
+            "processed_sitemaps": 0,
+            "urls_processed": 0,
+        }
 
         for sitemap_id in sitemap_ids:
             discovery_result = await self._discovery_service.discover_urls(sitemap_id)
@@ -352,12 +590,29 @@ class SchedulerProcessingPipelineService:
                 continue
 
             requeued_urls += await self._queue_service.enqueue_many(sitemap_url_ids)
+            last_checkpoint_data = {
+                "job_id": SITEMAP_REFRESH_JOB_ID,
+                "stage": "discovering",
+                "processed_sitemaps": refreshed_sitemaps,
+                "urls_processed": discovered_urls,
+                "requeued_urls": requeued_urls,
+            }
+            await self._runner.persist_checkpoint(
+                execution_id=execution_id,
+                checkpoint_data=last_checkpoint_data,
+                urls_processed=discovered_urls,
+            )
 
-        return {
+        summary = {
             "refreshed_sitemaps": refreshed_sitemaps,
             "discovered_urls": discovered_urls,
             "requeued_urls": requeued_urls,
         }
+        return JobRunResult(
+            summary=summary,
+            urls_processed=discovered_urls,
+            checkpoint_data=last_checkpoint_data,
+        )
 
     async def _list_websites_with_credentials(
         self,
@@ -439,11 +694,21 @@ class SchedulerProcessingPipelineService:
                 raw_response=None,
                 error_code="RATE_LIMITED",
                 error_message=str(error),
+                retry_after_seconds=None,
             )
 
         try:
             inspect_url_callable = client.inspect_url
-            return await inspect_url_callable(candidate.url, candidate.site_url)
+            async with session_scope() as session:
+                try:
+                    return await inspect_url_callable(
+                        candidate.url,
+                        candidate.site_url,
+                        website_id=website_id,
+                        session=session,
+                    )
+                except TypeError:
+                    return await inspect_url_callable(candidate.url, candidate.site_url)
         except Exception as error:
             return IndexStatusResult(
                 inspection_url=candidate.url,
@@ -459,6 +724,7 @@ class SchedulerProcessingPipelineService:
                 raw_response=None,
                 error_code="API_ERROR",
                 error_message=str(error),
+                retry_after_seconds=None,
             )
         finally:
             permit.release()
@@ -517,6 +783,27 @@ class SchedulerProcessingPipelineService:
         async with session_scope() as session:
             statement = select(URL.id).where(URL.sitemap_id == sitemap_id)
             return list((await session.scalars(statement)).all())
+
+    async def _log_activity(
+        self,
+        *,
+        event_type: str,
+        message: str,
+        website_id: UUID | None,
+        resource_type: str | None,
+        resource_id: UUID | None,
+        metadata: dict[str, Any] | None,
+    ) -> None:
+        async with session_scope() as session:
+            await self._activity_service.log_activity(
+                session=session,
+                event_type=event_type,
+                message=message,
+                website_id=website_id,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                metadata=metadata,
+            )
 
 
 def set_scheduler_processing_pipeline_service(

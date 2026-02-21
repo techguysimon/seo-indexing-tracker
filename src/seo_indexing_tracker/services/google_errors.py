@@ -40,6 +40,7 @@ class GoogleAPIError(Exception):
         details: dict[str, Any] | None,
         operation: str | None,
         service: str | None,
+        retry_after_seconds: int | None,
     ) -> None:
         self.message = message
         self.status_code = status_code
@@ -47,6 +48,7 @@ class GoogleAPIError(Exception):
         self.details = details
         self.operation = operation
         self.service = service
+        self.retry_after_seconds = retry_after_seconds
         super().__init__(message)
 
 
@@ -99,6 +101,36 @@ def _parse_payload_details(payload_text: str) -> dict[str, Any] | None:
         return cast(dict[str, Any], error_payload)
 
     return cast(dict[str, Any], parsed_payload)
+
+
+def _extract_retry_after_seconds(error: HttpError) -> int | None:
+    response = getattr(error, "resp", None)
+    if response is None:
+        return None
+
+    retry_after: Any | None = None
+    if hasattr(response, "get"):
+        try:
+            retry_after = response.get("retry-after")
+            if retry_after is None:
+                retry_after = response.get("Retry-After")
+        except Exception:
+            retry_after = None
+
+    if retry_after is None and hasattr(response, "headers"):
+        headers = getattr(response, "headers")
+        if hasattr(headers, "get"):
+            retry_after = headers.get("retry-after") or headers.get("Retry-After")
+
+    if retry_after is None:
+        return None
+
+    retry_after_text = str(retry_after).strip()
+    if not retry_after_text:
+        return None
+    if retry_after_text.isdigit():
+        return int(retry_after_text)
+    return None
 
 
 def _error_reasons(details: dict[str, Any] | None) -> set[str]:
@@ -186,6 +218,7 @@ def parse_google_http_error(
     reason_text = str(getattr(error, "reason", "") or "")
     payload_text = _extract_payload_text(error)
     payload_details = _parse_payload_details(payload_text)
+    retry_after_seconds = _extract_retry_after_seconds(error)
     message = str(payload_details.get("message")) if payload_details else str(error)
     reasons = _error_reasons(payload_details)
 
@@ -214,6 +247,7 @@ def parse_google_http_error(
         details=payload_details,
         operation=operation,
         service=service,
+        retry_after_seconds=retry_after_seconds,
     )
     _LOGGER.error(
         "google_api_http_error",

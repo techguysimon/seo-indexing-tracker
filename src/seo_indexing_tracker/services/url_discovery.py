@@ -20,6 +20,7 @@ from sqlalchemy import bindparam, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seo_indexing_tracker.models.sitemap import Sitemap, SitemapType
+from seo_indexing_tracker.models.sitemap_refresh_progress import SitemapRefreshProgress
 from seo_indexing_tracker.models.url import URL
 from seo_indexing_tracker.services.sitemap_fetcher import (
     SitemapFetchError,
@@ -601,13 +602,29 @@ class URLDiscoveryService:
             if sitemap is None:
                 raise ValueError(f"Sitemap {sitemap_id} does not exist")
 
+            refresh_progress = await self._start_refresh_progress(
+                session=session,
+                sitemap=sitemap,
+            )
+
             try:
+                await self._update_refresh_progress(
+                    session=session,
+                    refresh_progress=refresh_progress,
+                    status="fetching",
+                )
                 fetch_result = await fetch_sitemap(
                     sitemap.url,
                     etag=sitemap.etag,
                     last_modified=sitemap.last_modified_header,
                 )
             except SitemapFetchError as exc:
+                await self._update_refresh_progress(
+                    session=session,
+                    refresh_progress=refresh_progress,
+                    status="error",
+                    errors=f"fetch:{exc.__class__.__name__}",
+                )
                 http_status = getattr(exc, "status_code", None)
                 content_type = getattr(exc, "content_type", None)
                 logger.warning(
@@ -629,6 +646,15 @@ class URLDiscoveryService:
             sitemap.last_modified_header = fetch_result.last_modified
 
             if fetch_result.not_modified:
+                await self._update_refresh_progress(
+                    session=session,
+                    refresh_progress=refresh_progress,
+                    status="complete",
+                    urls_found=0,
+                    urls_new=0,
+                    urls_modified=0,
+                    errors=None,
+                )
                 return URLDiscoveryResult(
                     total_discovered=0,
                     new_count=0,
@@ -637,11 +663,22 @@ class URLDiscoveryService:
                 )
 
             try:
+                await self._update_refresh_progress(
+                    session=session,
+                    refresh_progress=refresh_progress,
+                    status="parsing",
+                )
                 records_by_url = await self._discover_records_by_url(
                     root_sitemap=sitemap,
                     root_fetch_result=fetch_result,
                 )
             except URLDiscoveryProcessingError as exc:
+                await self._update_refresh_progress(
+                    session=session,
+                    refresh_progress=refresh_progress,
+                    status="error",
+                    errors=f"{exc.stage}:{exc.reason or exc.__class__.__name__}",
+                )
                 logger.warning(
                     {
                         "event": "url_discovery_failed",
@@ -658,6 +695,15 @@ class URLDiscoveryService:
                 raise
 
             if not records_by_url:
+                await self._update_refresh_progress(
+                    session=session,
+                    refresh_progress=refresh_progress,
+                    status="complete",
+                    urls_found=0,
+                    urls_new=0,
+                    urls_modified=0,
+                    errors=None,
+                )
                 return URLDiscoveryResult(
                     total_discovered=0,
                     new_count=0,
@@ -666,6 +712,12 @@ class URLDiscoveryService:
                 )
 
             try:
+                await self._update_refresh_progress(
+                    session=session,
+                    refresh_progress=refresh_progress,
+                    status="discovering",
+                    urls_found=len(records_by_url),
+                )
                 existing_urls_result = await session.execute(
                     select(URL).where(
                         URL.website_id == sitemap.website_id,
@@ -749,6 +801,12 @@ class URLDiscoveryService:
                         batch,
                     )
             except Exception as exc:
+                await self._update_refresh_progress(
+                    session=session,
+                    refresh_progress=refresh_progress,
+                    status="error",
+                    errors=f"discovery:{exc.__class__.__name__}",
+                )
                 logger.exception(
                     {
                         "event": "url_discovery_failed",
@@ -770,12 +828,82 @@ class URLDiscoveryService:
                     content_type=fetch_result.content_type,
                 ) from exc
 
+            await self._update_refresh_progress(
+                session=session,
+                refresh_progress=refresh_progress,
+                status="complete",
+                urls_found=len(records_by_url),
+                urls_new=len(new_rows),
+                urls_modified=len(modified_rows),
+                errors=None,
+            )
+
             return URLDiscoveryResult(
                 total_discovered=len(records_by_url),
                 new_count=len(new_rows),
                 modified_count=len(modified_rows),
                 unchanged_count=unchanged_count,
             )
+
+    async def _start_refresh_progress(
+        self,
+        *,
+        session: AsyncSession,
+        sitemap: Sitemap,
+    ) -> SitemapRefreshProgress:
+        now = datetime.now(UTC)
+        existing_progress = await session.scalar(
+            select(SitemapRefreshProgress).where(
+                SitemapRefreshProgress.sitemap_id == sitemap.id
+            )
+        )
+        if existing_progress is not None:
+            existing_progress.status = "pending"
+            existing_progress.started_at = now
+            existing_progress.updated_at = now
+            existing_progress.urls_found = 0
+            existing_progress.urls_new = 0
+            existing_progress.urls_modified = 0
+            existing_progress.errors = None
+            await session.flush()
+            return existing_progress
+
+        progress = SitemapRefreshProgress(
+            sitemap_id=sitemap.id,
+            website_id=sitemap.website_id,
+            status="pending",
+            started_at=now,
+            updated_at=now,
+            urls_found=0,
+            urls_new=0,
+            urls_modified=0,
+            errors=None,
+        )
+        session.add(progress)
+        await session.flush()
+        return progress
+
+    async def _update_refresh_progress(
+        self,
+        *,
+        session: AsyncSession,
+        refresh_progress: SitemapRefreshProgress,
+        status: str,
+        urls_found: int | None = None,
+        urls_new: int | None = None,
+        urls_modified: int | None = None,
+        errors: str | None = None,
+    ) -> None:
+        refresh_progress.status = status
+        refresh_progress.updated_at = datetime.now(UTC)
+        if urls_found is not None:
+            refresh_progress.urls_found = urls_found
+        if urls_new is not None:
+            refresh_progress.urls_new = urls_new
+        if urls_modified is not None:
+            refresh_progress.urls_modified = urls_modified
+        refresh_progress.errors = errors
+        await session.flush()
 
 
 __all__ = [

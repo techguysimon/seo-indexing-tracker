@@ -17,6 +17,19 @@
   {% include "partials/dashboard_stats.html" %}
 </section>
 
+<section id="system-status-container">
+  {% include "partials/system_status.html" with context %}
+</section>
+
+<section
+  id="activity-feed"
+  hx-get="/web/partials/activity-feed"
+  hx-trigger="load, every 20s"
+  hx-swap="innerHTML"
+>
+  {% include "partials/activity_feed.html" with context %}
+</section>
+
 <section
   id="queue-status"
   hx-get="/web/partials/queue-status"

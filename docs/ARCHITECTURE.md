@@ -365,6 +365,13 @@ The database uses SQLite with WAL (Write-Ahead Logging) mode for:
 - **index_statuses**: Index verification results
 - **submission_logs**: API submission history
 
+### Index Status Consistency Contract
+
+- `index_statuses` remains the canonical source of truth for URL verification state.
+- `urls.latest_index_status` is a denormalized cache used only for high-throughput filtering and queue queries.
+- Writers must update `index_statuses` and `urls.latest_index_status` in the same database transaction.
+- A weekly reconciliation job compares canonical history with the denormalized cache and repairs drift.
+
 ## Web UI
 
 The frontend uses HTMX for dynamic interactions without JavaScript:

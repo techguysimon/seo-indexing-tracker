@@ -6,10 +6,29 @@
     <li>
       <strong>{{ website.domain }}</strong>
       <span>{{ website.site_url }}</span>
-      <span>Rate limit bucket: {{ website.rate_limit_bucket_size }}</span>
-      <span>Refill rate: {{ "%.2f" | format(website.rate_limit_refill_rate) }}</span>
-      <span>Max concurrent requests: {{ website.rate_limit_max_concurrent_requests }}</span>
-      <span>Queue excess requests: {% if website.rate_limit_queue_excess_requests %}Yes{% else %}No{% endif %}</span>
+      <span>Quota status: <strong>{{ quota_status.status }}</strong></span>
+      <span>Indexing quota: {{ quota_status.indexing.used }} / {{ quota_status.indexing.limit }} (confidence: {{ "%.0f" | format(quota_status.confidence * 100) }}%)</span>
+      <div class="bar-track quota-track" role="img" aria-label="Indexing quota usage progress">
+        <div class="bar-fill quota-indexing" style="--bar: {{ "%.2f" | format((quota_status.indexing.used / quota_status.indexing.limit * 100) if quota_status.indexing.limit > 0 else 0) }}%;"></div>
+      </div>
+      <span>Inspection quota: {{ quota_status.inspection.used }} / {{ quota_status.inspection.limit }} (confidence: {{ "%.0f" | format(quota_status.confidence * 100) }}%)</span>
+      <div class="bar-track quota-track" role="img" aria-label="Inspection quota usage progress">
+        <div class="bar-fill quota-inspection" style="--bar: {{ "%.2f" | format((quota_status.inspection.used / quota_status.inspection.limit * 100) if quota_status.inspection.limit > 0 else 0) }}%;"></div>
+      </div>
+      <form
+        class="inline-form"
+        action="/ui/websites/{{ website.id }}/quota/discover"
+        method="post"
+        hx-post="/ui/websites/{{ website.id }}/quota/discover"
+        hx-target="#website-detail-region"
+        hx-swap="innerHTML"
+      >
+        <button type="submit" class="panel-button panel-button-small">Test quota</button>
+      </form>
+      <span>Indexed URLs: {{ index_stats.indexed_count }}</span>
+      <span>Not indexed URLs: {{ index_stats.not_indexed_count }}</span>
+      <span>Coverage: {{ index_stats.coverage_percentage }}%</span>
+      <a class="panel-button panel-button-ghost" href="/ui/websites/{{ website.id }}/urls">View URL drill-down</a>
     </li>
   </ul>
 </section>

@@ -8,6 +8,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from enum import Enum
+import logging
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -41,6 +42,8 @@ from seo_indexing_tracker.services.rate_limiter import (
 SessionScopeFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 ProgressCallback = Callable[["BatchProgressUpdate"], Awaitable[None] | None]
 
+_batch_logger = logging.getLogger("seo_indexing_tracker.batch_processor")
+
 DEFAULT_DEQUEUE_BATCH_SIZE = 100
 DEFAULT_SUBMIT_BATCH_SIZE = 100
 DEFAULT_INSPECTION_BATCH_SIZE = 25
@@ -65,6 +68,7 @@ class BatchProgressUpdate:
     processed_urls: int
     successful_urls: int
     failed_urls: int
+    checkpoint_data: dict[str, Any] | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -120,11 +124,21 @@ class _IndexingBatchClient(Protocol):
         self,
         urls: list[str] | tuple[str, ...],
         action: str = "URL_UPDATED",
+        *,
+        website_id: UUID | None = None,
+        session: AsyncSession | None = None,
     ) -> BatchSubmitResult: ...
 
 
 class _URLInspectionClient(Protocol):
-    async def inspect_url(self, url: str, site_url: str) -> IndexStatusResult: ...
+    async def inspect_url(
+        self,
+        url: str,
+        site_url: str,
+        *,
+        website_id: UUID | None = None,
+        session: AsyncSession | None = None,
+    ) -> IndexStatusResult: ...
 
 
 class _GoogleClientBundle(Protocol):
@@ -245,6 +259,7 @@ class BatchProcessorService:
             url_ids=ordered_url_ids
         )
         eligible_for_submission: list[URL] = []
+        next_checkpoint_at = 100
 
         for queued_url in queued_urls:
             latest_status = latest_statuses.get(queued_url.id)
@@ -308,6 +323,21 @@ class BatchProcessorService:
                     len(submitted_results)
                     - self._submission_success_count(list(outcomes.values()))
                 ),
+            )
+            next_checkpoint_at = await self._emit_checkpoint_if_due(
+                callback=progress_callback,
+                website_id=website_id,
+                total_urls=len(queued_urls),
+                processed_urls=(
+                    len(submitted_results)
+                    + self._submission_skipped_count(list(outcomes.values()))
+                ),
+                successful_urls=self._submission_success_count(list(outcomes.values())),
+                failed_urls=(
+                    len(submitted_results)
+                    - self._submission_success_count(list(outcomes.values()))
+                ),
+                next_checkpoint_at=next_checkpoint_at,
             )
 
         await self._record_submission_logs(action=action, logs=submission_logs)
@@ -445,10 +475,19 @@ class BatchProcessorService:
             return results, logs
 
         try:
-            batch_result = await client.batch_submit(
-                [url.url for url in submittable_urls],
-                action.value,
-            )
+            async with self._session_factory() as session:
+                try:
+                    batch_result = await client.batch_submit(
+                        [url.url for url in submittable_urls],
+                        action.value,
+                        website_id=website_id,
+                        session=session,
+                    )
+                except TypeError:
+                    batch_result = await client.batch_submit(
+                        [url.url for url in submittable_urls],
+                        action.value,
+                    )
         except Exception as error:
             for url in submittable_urls:
                 result = self._submission_failure_result(
@@ -543,7 +582,16 @@ class BatchProcessorService:
             )
 
         try:
-            return url.id, await client.inspect_url(url.url, site_url)
+            async with self._session_factory() as session:
+                try:
+                    return url.id, await client.inspect_url(
+                        url.url,
+                        site_url,
+                        website_id=website_id,
+                        session=session,
+                    )
+                except TypeError:
+                    return url.id, await client.inspect_url(url.url, site_url)
         except Exception as error:
             return (
                 url.id,
@@ -691,6 +739,7 @@ class BatchProcessorService:
             metadata=None,
             error_code=error_code,
             error_message=error_message,
+            retry_after_seconds=None,
         )
 
     @staticmethod
@@ -715,6 +764,7 @@ class BatchProcessorService:
             raw_response=None,
             error_code=error_code,
             error_message=error_message,
+            retry_after_seconds=None,
         )
 
     @staticmethod
@@ -934,6 +984,7 @@ class BatchProcessorService:
         processed_urls: int,
         successful_urls: int,
         failed_urls: int,
+        checkpoint_data: dict[str, Any] | None = None,
     ) -> None:
         if callback is None:
             return
@@ -946,6 +997,7 @@ class BatchProcessorService:
             processed_urls=processed_urls,
             successful_urls=successful_urls,
             failed_urls=failed_urls,
+            checkpoint_data=checkpoint_data,
         )
         try:
             maybe_awaitable = callback(update)
@@ -954,6 +1006,50 @@ class BatchProcessorService:
             await maybe_awaitable
         except Exception:
             return
+
+    async def _emit_checkpoint_if_due(
+        self,
+        *,
+        callback: ProgressCallback | None,
+        website_id: UUID,
+        total_urls: int,
+        processed_urls: int,
+        successful_urls: int,
+        failed_urls: int,
+        next_checkpoint_at: int,
+    ) -> int:
+        checkpoint_interval = 100
+        if processed_urls <= 0:
+            return next_checkpoint_at
+
+        updated_checkpoint_at = max(next_checkpoint_at, checkpoint_interval)
+        while processed_urls >= updated_checkpoint_at:
+            checkpoint_data = {
+                "website_id": str(website_id),
+                "processed_urls": updated_checkpoint_at,
+                "total_urls": total_urls,
+                "successful_urls": successful_urls,
+                "failed_urls": failed_urls,
+                "checkpoint_interval": checkpoint_interval,
+            }
+            _batch_logger.info(
+                "batch_processing_checkpoint",
+                extra=checkpoint_data,
+            )
+            await self._emit_progress(
+                callback=callback,
+                website_id=website_id,
+                stage="checkpoint",
+                message="Batch checkpoint reached",
+                total_urls=total_urls,
+                processed_urls=updated_checkpoint_at,
+                successful_urls=successful_urls,
+                failed_urls=failed_urls,
+                checkpoint_data=checkpoint_data,
+            )
+            updated_checkpoint_at += checkpoint_interval
+
+        return updated_checkpoint_at
 
 
 __all__ = [

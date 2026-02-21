@@ -220,6 +220,28 @@ Treat sitemap fetch policy as security-sensitive code:
   - fail-closed behavior if connect destination metadata is unavailable
 - Keep trigger diagnostics aligned with runtime behavior: detailed stage metadata in logs, category-level UI feedback (`fetch`/`parse`/`discovery`/`enqueue`), and URL sanitization via `sitemap_url_sanitized`.
 
+## Crash Recovery Guarantees
+
+### What is Preserved
+- **URLs**: All discovered URLs and their metadata (lastmod, priority)
+- **IndexStatus**: All historical index verification results
+- **QuotaUsage**: Daily API usage counters
+- **Scheduler Jobs**: Job definitions persist via APScheduler's SQLAlchemyJobStore
+- **JobExecution**: Job run history and checkpoints
+- **RateLimitState**: Token bucket state for rate limiting
+- **ActivityLog**: All logged events
+
+### What is Lost on Crash
+- In-flight HTTP requests to Google APIs
+- Non-checkpointed batch progress (last ~100 URLs in current batch)
+- In-memory semaphores (recreated on startup)
+
+### Recovery Behavior
+- On restart, scheduler jobs resume from their stored definitions
+- Running JobExecution records are marked as "failed" if unfinished
+- Batch operations can be resumed from last checkpoint
+- Token bucket state is restored from RateLimitState table
+
 ## Testing Guidelines
 
 - Tests go in `tests/` directory mirroring `src/` structure

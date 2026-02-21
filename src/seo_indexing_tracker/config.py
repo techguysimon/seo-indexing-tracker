@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     SCHEDULER_SITEMAP_REFRESH_INTERVAL_SECONDS: int = Field(default=3600, ge=1)
     SCHEDULER_URL_SUBMISSION_BATCH_SIZE: int = Field(default=100, ge=1)
     SCHEDULER_INDEX_VERIFICATION_BATCH_SIZE: int = Field(default=100, ge=1)
+    JOB_RECOVERY_AUTO_RESUME: bool = False
+    SHUTDOWN_GRACE_PERIOD_SECONDS: int = Field(default=30, ge=1)
     INDEXING_DAILY_QUOTA_LIMIT: int = Field(default=200, ge=0)
     INSPECTION_DAILY_QUOTA_LIMIT: int = Field(default=2000, ge=0)
     OUTBOUND_HTTP_USER_AGENT: str = "BlueBeastBuildAgent"

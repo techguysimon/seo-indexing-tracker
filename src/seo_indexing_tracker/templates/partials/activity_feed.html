@@ -1,0 +1,14 @@
+<div class="panel chart-panel">
+  <h2>Recent activity</h2>
+  <ul class="data-list">
+    {% for event in activities %}
+    <li>
+      <strong>{{ event.event_type }}</strong>
+      <span>{{ event.message }}</span>
+      <span>{{ event.website_domain }} - {{ event.created_at.isoformat() }}</span>
+    </li>
+    {% else %}
+    <li>No activity yet.</li>
+    {% endfor %}
+  </ul>
+</div>

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,6 +25,24 @@ from seo_indexing_tracker.models import Base
 DEFAULT_POOL_SIZE = 5
 DEFAULT_MAX_OVERFLOW = 10
 SQLITE_BUSY_TIMEOUT_SECONDS = 30
+
+_database_health_logger = logging.getLogger("seo_indexing_tracker.database.health")
+
+
+@dataclass(slots=True, frozen=True)
+class DatabaseHealthCheckResult:
+    """Outcome details for startup database consistency checks."""
+
+    integrity_ok: bool
+    orphan_counts: dict[str, int]
+
+    @property
+    def orphaned_rows(self) -> int:
+        return sum(self.orphan_counts.values())
+
+    @property
+    def is_healthy(self) -> bool:
+        return self.integrity_ok and self.orphaned_rows == 0
 
 
 def _is_sqlite_url(database_url: str) -> bool:
@@ -130,6 +150,105 @@ async def initialize_database() -> None:
             )
 
 
+async def run_startup_database_health_check(
+    *,
+    fail_fast_on_integrity_error: bool = True,
+) -> DatabaseHealthCheckResult:
+    """Validate startup database integrity and key orphan constraints."""
+
+    async with engine.connect() as connection:
+        integrity_ok = True
+        if _is_sqlite_url(str(connection.engine.url)):
+            integrity_rows = (
+                (await connection.execute(text("PRAGMA integrity_check;")))
+                .scalars()
+                .all()
+            )
+            integrity_ok = len(integrity_rows) == 1 and integrity_rows[0] == "ok"
+            if integrity_ok:
+                _database_health_logger.info("database_integrity_check_ok")
+            else:
+                _database_health_logger.error(
+                    "database_integrity_check_failed",
+                    extra={"integrity_rows": integrity_rows},
+                )
+
+        orphan_queries: tuple[tuple[str, str], ...] = (
+            (
+                "urls_without_website",
+                """
+                SELECT COUNT(*)
+                FROM urls AS u
+                LEFT JOIN websites AS w ON w.id = u.website_id
+                WHERE w.id IS NULL
+                """,
+            ),
+            (
+                "index_statuses_without_url",
+                """
+                SELECT COUNT(*)
+                FROM index_statuses AS s
+                LEFT JOIN urls AS u ON u.id = s.url_id
+                WHERE u.id IS NULL
+                """,
+            ),
+            (
+                "quota_usages_without_website",
+                """
+                SELECT COUNT(*)
+                FROM quota_usages AS q
+                LEFT JOIN websites AS w ON w.id = q.website_id
+                WHERE w.id IS NULL
+                """,
+            ),
+            (
+                "rate_limit_states_without_website",
+                """
+                SELECT COUNT(*)
+                FROM rate_limit_states AS r
+                LEFT JOIN websites AS w ON w.id = r.website_id
+                WHERE w.id IS NULL
+                """,
+            ),
+        )
+        orphan_counts: dict[str, int] = {}
+        for key, query in orphan_queries:
+            count = int((await connection.execute(text(query))).scalar_one())
+            orphan_counts[key] = count
+
+    orphaned_rows = sum(orphan_counts.values())
+    if orphaned_rows > 0:
+        _database_health_logger.warning(
+            "database_orphan_rows_detected",
+            extra={"orphan_counts": orphan_counts, "orphaned_rows": orphaned_rows},
+        )
+    else:
+        _database_health_logger.info(
+            "database_orphan_check_ok",
+            extra={"orphan_counts": orphan_counts},
+        )
+
+    result = DatabaseHealthCheckResult(
+        integrity_ok=integrity_ok,
+        orphan_counts=orphan_counts,
+    )
+    _database_health_logger.info(
+        "database_startup_health_check_completed",
+        extra={
+            "integrity_ok": result.integrity_ok,
+            "orphaned_rows": result.orphaned_rows,
+            "healthy": result.is_healthy,
+        },
+    )
+
+    if fail_fast_on_integrity_error and not result.integrity_ok:
+        raise RuntimeError(
+            "Database integrity check failed. Review logs before restarting."
+        )
+
+    return result
+
+
 async def close_database() -> None:
     """Dispose database engine and release pooled connections."""
 
@@ -142,5 +261,6 @@ __all__ = [
     "engine",
     "get_db_session",
     "initialize_database",
+    "run_startup_database_health_check",
     "session_scope",
 ]

@@ -19,18 +19,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from seo_indexing_tracker.database import get_db_session
+from seo_indexing_tracker.api.urls import (
+    WebsiteURLListResponse,
+    ensure_website_exists,
+    fetch_website_urls,
+    list_website_sitemaps,
+)
 from seo_indexing_tracker.models import (
+    ActivityLog,
+    JobExecution,
     ServiceAccount,
     Sitemap,
     SitemapType,
     URL,
+    URLIndexStatus,
     Website,
 )
+from seo_indexing_tracker.services.index_stats_service import IndexStatsService
+from seo_indexing_tracker.services.activity_service import ActivityService
 from seo_indexing_tracker.services.config_validation import (
     ConfigurationValidationError,
     ConfigurationValidationService,
 )
 from seo_indexing_tracker.services.priority_queue import PriorityQueueService
+from seo_indexing_tracker.services.quota_discovery_service import QuotaDiscoveryService
 from seo_indexing_tracker.services.sitemap_fetcher import (
     SitemapFetchError,
     SitemapFetchNetworkError,
@@ -41,10 +53,17 @@ from seo_indexing_tracker.services.url_discovery import (
     URLDiscoveryProcessingError,
     URLDiscoveryService,
 )
+from seo_indexing_tracker.services.processing_pipeline import (
+    INDEX_VERIFICATION_JOB_ID,
+    SITEMAP_REFRESH_JOB_ID,
+    URL_SUBMISSION_JOB_ID,
+)
 
 router = APIRouter(tags=["web"])
 
 _config_validation_service = ConfigurationValidationService()
+_quota_discovery_service = QuotaDiscoveryService()
+_activity_service = ActivityService()
 _trigger_logger = logging.getLogger("seo_indexing_tracker.web.trigger_indexing")
 _DEFAULT_PAGE_SIZE = 12
 _MAX_PAGE_SIZE = 100
@@ -228,7 +247,47 @@ def _query_filters(
     }
 
 
-async def _fetch_dashboard_metrics(session: AsyncSession) -> dict[str, object]:
+def _format_next_run_by_job(request: Request) -> dict[str, str]:
+    scheduler = getattr(request.app.state, "scheduler_service", None)
+    if scheduler is None or not getattr(scheduler, "enabled", False):
+        return {
+            "url_submission": "Scheduler disabled",
+            "index_verification": "Scheduler disabled",
+            "sitemap_refresh": "Scheduler disabled",
+        }
+
+    try:
+        scheduler_jobs = scheduler.list_jobs()
+    except RuntimeError:
+        return {
+            "url_submission": "Unavailable",
+            "index_verification": "Unavailable",
+            "sitemap_refresh": "Unavailable",
+        }
+
+    next_run_by_job_id = {
+        job.job_id: job.next_run_time.isoformat() if job.next_run_time else "Paused"
+        for job in scheduler_jobs
+    }
+    return {
+        "url_submission": next_run_by_job_id.get(
+            URL_SUBMISSION_JOB_ID, "Not registered"
+        ),
+        "index_verification": next_run_by_job_id.get(
+            INDEX_VERIFICATION_JOB_ID,
+            "Not registered",
+        ),
+        "sitemap_refresh": next_run_by_job_id.get(
+            SITEMAP_REFRESH_JOB_ID, "Not registered"
+        ),
+    }
+
+
+async def _fetch_dashboard_metrics(
+    *,
+    request: Request,
+    session: AsyncSession,
+) -> dict[str, object]:
     queued_urls = int(
         (
             await session.scalar(
@@ -282,12 +341,76 @@ async def _fetch_dashboard_metrics(session: AsyncSession) -> dict[str, object]:
         for row in queue_by_website_result
     ]
 
+    index_stats = await IndexStatsService.get_dashboard_index_stats(session=session)
+
     return {
         "queued_urls": queued_urls,
         "manual_overrides": manual_overrides,
         "active_websites": active_websites,
         "tracked_urls": tracked_urls,
         "queue_by_website": queue_by_website,
+        "index_stats": index_stats,
+        "next_scheduled_runs": _format_next_run_by_job(request),
+    }
+
+
+async def _fetch_recent_activity(
+    *,
+    session: AsyncSession,
+    limit: int = 20,
+) -> list[dict[str, object]]:
+    rows = (
+        await session.execute(
+            select(ActivityLog, Website.domain)
+            .outerjoin(Website, Website.id == ActivityLog.website_id)
+            .order_by(ActivityLog.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    return [
+        {
+            "id": row[0].id,
+            "event_type": row[0].event_type,
+            "message": row[0].message,
+            "website_id": row[0].website_id,
+            "website_domain": row[1] or "Global",
+            "created_at": row[0].created_at,
+        }
+        for row in rows
+    ]
+
+
+async def _build_system_status_context(
+    *,
+    request: Request,
+    session: AsyncSession,
+) -> dict[str, object]:
+    running_rows = (
+        (
+            await session.execute(
+                select(JobExecution)
+                .where(JobExecution.status == "running")
+                .order_by(JobExecution.started_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    running_jobs = [
+        {
+            "job_id": row.job_id,
+            "job_name": row.job_name,
+            "started_at": row.started_at,
+            "urls_processed": row.urls_processed,
+            "checkpoint_data": row.checkpoint_data,
+        }
+        for row in running_rows
+    ]
+    has_running_jobs = bool(running_jobs)
+    return {
+        "running_jobs": running_jobs,
+        "next_scheduled_runs": _format_next_run_by_job(request),
+        "refresh_trigger": "load, every 10s" if has_running_jobs else "load, every 30s",
     }
 
 
@@ -413,6 +536,14 @@ async def _render_website_detail(
         ),
         "sitemap_types": [SitemapType.URLSET.value, SitemapType.INDEX.value],
         "feedback": feedback,
+        "index_stats": await IndexStatsService.get_website_index_stats(
+            session=session,
+            website_id=website_id,
+        ),
+        "quota_status": await _quota_discovery_service.get_discovered_limits(
+            session=session,
+            website_id=website_id,
+        ),
     }
     template_name = (
         "partials/website_detail_panel.html"
@@ -463,11 +594,20 @@ async def dashboard(
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     templates = _get_templates(request)
-    metrics = await _fetch_dashboard_metrics(session)
+    metrics = await _fetch_dashboard_metrics(request=request, session=session)
+    activities = await _fetch_recent_activity(session=session, limit=20)
+    system_status = await _build_system_status_context(request=request, session=session)
     return templates.TemplateResponse(
         request=request,
         name="pages/dashboard.html",
-        context={"page_title": "Dashboard", "metrics": metrics},
+        context={
+            "page_title": "Dashboard",
+            "metrics": metrics,
+            "activities": activities,
+            "running_jobs": system_status["running_jobs"],
+            "next_scheduled_runs": system_status["next_scheduled_runs"],
+            "refresh_trigger": system_status["refresh_trigger"],
+        },
     )
 
 
@@ -477,11 +617,37 @@ async def dashboard_stats_partial(
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
     templates = _get_templates(request)
-    metrics = await _fetch_dashboard_metrics(session)
+    metrics = await _fetch_dashboard_metrics(request=request, session=session)
     return templates.TemplateResponse(
         request=request,
         name="partials/dashboard_stats.html",
         context={"metrics": metrics},
+    )
+
+
+@router.get("/web/partials/activity-feed", response_class=HTMLResponse)
+async def dashboard_activity_feed_partial(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    templates = _get_templates(request)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/activity_feed.html",
+        context={"activities": await _fetch_recent_activity(session=session, limit=20)},
+    )
+
+
+@router.get("/web/partials/system-status", response_class=HTMLResponse)
+async def dashboard_system_status_partial(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    templates = _get_templates(request)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/system_status.html",
+        context=await _build_system_status_context(request=request, session=session),
     )
 
 
@@ -740,6 +906,58 @@ async def website_detail(
     )
 
 
+@router.get("/ui/websites/{website_id}/urls", response_class=Response)
+async def website_urls_page(
+    request: Request,
+    website_id: UUID,
+    status_filter: URLIndexStatus | None = Query(default=None, alias="status"),
+    sitemap_id: UUID | None = Query(default=None),
+    search: str = Query(default=""),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    templates = _get_templates(request)
+    await ensure_website_exists(session=session, website_id=website_id)
+    website = await session.get(Website, website_id)
+    if website is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Website not found",
+        )
+
+    sitemap_options = await list_website_sitemaps(
+        session=session, website_id=website_id
+    )
+    listing: WebsiteURLListResponse = await fetch_website_urls(
+        session=session,
+        website_id=website_id,
+        status_filter=status_filter,
+        sitemap_id=sitemap_id,
+        search=search,
+        page=page,
+        page_size=page_size,
+        include_all=False,
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="pages/website_urls.html",
+        context={
+            "page_title": f"{website.domain} URL Index Status",
+            "website": website,
+            "listing": listing,
+            "sitemap_options": sitemap_options,
+            "status_options": list(URLIndexStatus),
+            "filters": {
+                "status": status_filter,
+                "sitemap_id": sitemap_id,
+                "search": search,
+                "page_size": page_size,
+            },
+        },
+    )
+
+
 @router.post(
     "/ui/websites", response_class=Response, status_code=status.HTTP_201_CREATED
 )
@@ -903,6 +1121,15 @@ async def create_sitemap_for_website_from_web(
         )
         session.add(sitemap)
         await session.flush()
+        await _activity_service.log_activity(
+            session=session,
+            event_type="sitemap_added",
+            website_id=website_id,
+            resource_type="sitemap",
+            resource_id=sitemap.id,
+            message=f"Sitemap added: {sitemap.url}",
+            metadata={"sitemap_type": sitemap.sitemap_type.value},
+        )
     except ConfigurationValidationError as error:
         feedback = str(error)
     except ValueError:
@@ -934,6 +1161,15 @@ async def delete_sitemap_from_web(
         )
 
     website_id = sitemap.website_id
+    await _activity_service.log_activity(
+        session=session,
+        event_type="sitemap_removed",
+        website_id=website_id,
+        resource_type="sitemap",
+        resource_id=sitemap.id,
+        message=f"Sitemap removed: {sitemap.url}",
+        metadata={"sitemap_type": sitemap.sitemap_type.value},
+    )
     await session.delete(sitemap)
     await session.flush()
     return await _render_website_detail(
@@ -1078,6 +1314,31 @@ async def trigger_indexing(
         session=session,
         website_id=website_id,
         feedback=feedback,
+    )
+
+
+@router.post("/websites/{website_id}/quota/discover", response_class=Response)
+@router.post("/ui/websites/{website_id}/quota/discover", response_class=Response)
+async def discover_quota_from_web(
+    request: Request,
+    website_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    website = await session.get(Website, website_id)
+    if website is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Website not found",
+        )
+
+    await _quota_discovery_service.discover_quota(
+        session=session, website_id=website_id
+    )
+    return await _render_website_detail(
+        request=request,
+        session=session,
+        website_id=website_id,
+        feedback="Quota discovery started",
     )
 
 

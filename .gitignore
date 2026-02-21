@@ -17,8 +17,10 @@ data/*.db-shm
 data/*.db-wal
 scheduler-jobs.sqlite
 *.sqlite
+*-smoke.sqlite
 *.sqlite-shm
 *.sqlite-wal
+phase*-*.db
 
 service-accounts/
 

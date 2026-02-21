@@ -13,8 +13,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from seo_indexing_tracker.config import get_settings
-from seo_indexing_tracker.models import QuotaUsage, Website
+from seo_indexing_tracker.config import Settings, get_settings
+from seo_indexing_tracker.models import QuotaDiscoveryStatus, QuotaUsage, Website
 
 SessionScopeFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
@@ -70,10 +70,15 @@ class QuotaService:
         parsed_api_type = self._parse_api_type(api_type)
         usage_date = self._today_factory()
         counter_name = self._counter_name(parsed_api_type)
-        quota_limit = self._quota_limit(parsed_api_type)
-
         async with self._session_factory() as session:
-            await self._require_website(session=session, website_id=website_id)
+            website = await self._require_website(
+                session=session, website_id=website_id
+            )
+            quota_limit = self._quota_limit(
+                api_type=parsed_api_type,
+                website=website,
+                settings=self._settings,
+            )
             usage = await self._get_or_create_usage_row(
                 session=session,
                 website_id=website_id,
@@ -96,10 +101,15 @@ class QuotaService:
         parsed_api_type = self._parse_api_type(api_type)
         usage_date = self._today_factory()
         counter_name = self._counter_name(parsed_api_type)
-        quota_limit = self._quota_limit(parsed_api_type)
-
         async with self._session_factory() as session:
-            await self._require_website(session=session, website_id=website_id)
+            website = await self._require_website(
+                session=session, website_id=website_id
+            )
+            quota_limit = self._quota_limit(
+                api_type=parsed_api_type,
+                website=website,
+                settings=self._settings,
+            )
             usage = await self._get_usage_row(
                 session=session,
                 website_id=website_id,
@@ -127,10 +137,11 @@ class QuotaService:
 
     async def _require_website(
         self, *, session: AsyncSession, website_id: UUID
-    ) -> None:
+    ) -> Website:
         website = await session.get(Website, website_id)
         if website is None:
             raise ValueError(f"Website {website_id} does not exist")
+        return website
 
     async def _get_usage_row(
         self,
@@ -186,11 +197,32 @@ class QuotaService:
                 f"Unsupported api_type '{api_type}'. Expected one of: {valid_values}"
             ) from error
 
-    def _quota_limit(self, api_type: QuotaAPIType) -> int:
-        if api_type is QuotaAPIType.INDEXING:
-            return self._settings.INDEXING_DAILY_QUOTA_LIMIT
+    @staticmethod
+    def _quota_limit(
+        *,
+        api_type: QuotaAPIType,
+        website: Website,
+        settings: Settings | QuotaSettings,
+    ) -> int:
+        status = website.quota_discovery_status
+        confidence = float(website.quota_discovery_confidence)
 
-        return self._settings.INSPECTION_DAILY_QUOTA_LIMIT
+        if api_type is QuotaAPIType.INDEXING:
+            discovered_limit = website.discovered_indexing_quota
+            fallback_limit = int(settings.INDEXING_DAILY_QUOTA_LIMIT)
+        else:
+            discovered_limit = website.discovered_inspection_quota
+            fallback_limit = int(settings.INSPECTION_DAILY_QUOTA_LIMIT)
+
+        if discovered_limit is None:
+            return fallback_limit
+        if status is QuotaDiscoveryStatus.CONFIRMED:
+            return int(discovered_limit)
+        if status is QuotaDiscoveryStatus.ESTIMATED and confidence >= 0.5:
+            return int(discovered_limit)
+        if status is QuotaDiscoveryStatus.DISCOVERING and confidence >= 0.8:
+            return int(discovered_limit)
+        return min(int(discovered_limit), fallback_limit)
 
     @staticmethod
     def _counter_name(api_type: QuotaAPIType) -> str:

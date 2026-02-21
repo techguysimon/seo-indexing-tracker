@@ -239,6 +239,10 @@ Each website requires its own Google service account for quota isolation:
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed system architecture.
 
+## Observability
+
+See [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) for index coverage metrics, URL drill-down APIs, dynamic quota discovery, activity feed behavior, and crash-recovery observability notes.
+
 ## API Disclaimer
 
 The Google Indexing API is officially documented for `JobPosting` and `BroadcastEvent` structured data only. Many SEO practitioners use it for general content and report that it works in practice. This system uses the URL Inspection API as the source of truth for index status, so even if the Indexing API stops working for general content, the system will continue to function as a monitoring tool.

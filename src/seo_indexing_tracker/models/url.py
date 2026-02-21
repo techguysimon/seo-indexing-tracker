@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    Enum as SqlEnum,
     ForeignKey,
     Index,
     String,
@@ -38,6 +40,17 @@ def _calculate_default_current_priority(context: Any) -> float:
     return float(sitemap_priority)
 
 
+class URLIndexStatus(str, Enum):
+    """Denormalized latest index state used for fast URL filtering."""
+
+    INDEXED = "INDEXED"
+    NOT_INDEXED = "NOT_INDEXED"
+    BLOCKED = "BLOCKED"
+    SOFT_404 = "SOFT_404"
+    ERROR = "ERROR"
+    UNCHECKED = "UNCHECKED"
+
+
 class URL(Base):
     """Tracked URL discovered from sitemaps or manual input."""
 
@@ -57,6 +70,11 @@ class URL(Base):
             name="ck_urls_manual_priority_override_range",
         ),
         Index("ix_urls_website_id", "website_id"),
+        Index(
+            "ix_urls_website_id_latest_index_status",
+            "website_id",
+            "latest_index_status",
+        ),
         Index("ix_urls_current_priority", "current_priority"),
         Index("ix_urls_updated_at", "updated_at"),
     )
@@ -83,6 +101,13 @@ class URL(Base):
         server_default=text(str(DEFAULT_URL_PRIORITY)),
     )
     manual_priority_override: Mapped[float | None] = mapped_column()
+    latest_index_status: Mapped[URLIndexStatus] = mapped_column(
+        SqlEnum(URLIndexStatus, name="url_index_status"),
+        nullable=False,
+        default=URLIndexStatus.UNCHECKED,
+        server_default=URLIndexStatus.UNCHECKED.value,
+    )
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     discovered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -107,4 +132,4 @@ class URL(Base):
     )
 
 
-__all__ = ["DEFAULT_URL_PRIORITY", "URL"]
+__all__ = ["DEFAULT_URL_PRIORITY", "URL", "URLIndexStatus"]

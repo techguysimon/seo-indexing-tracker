@@ -10,8 +10,10 @@ import logging
 from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import urlparse
+from uuid import UUID
 
 from googleapiclient.discovery import build  # type: ignore[import-untyped]
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from seo_indexing_tracker.services.google_credentials import (
     GoogleCredentialsError,
@@ -24,6 +26,7 @@ from seo_indexing_tracker.services.google_errors import (
     QuotaExceededError,
     execute_with_google_retry,
 )
+from seo_indexing_tracker.services.quota_discovery_service import QuotaDiscoveryService
 
 WEBMASTERS_SCOPE = "https://www.googleapis.com/auth/webmasters"
 _LOGGER = logging.getLogger("seo_indexing_tracker.google_api.search_console")
@@ -57,6 +60,7 @@ class IndexStatusResult:
     raw_response: dict[str, Any] | None
     error_code: str | None
     error_message: str | None
+    retry_after_seconds: int | None
 
 
 class _GoogleBuildCallable(Protocol):
@@ -207,6 +211,7 @@ class GoogleURLInspectionClient:
         error_code: str,
         error_message: str,
         raw_response: dict[str, Any] | None = None,
+        retry_after_seconds: int | None = None,
     ) -> IndexStatusResult:
         return IndexStatusResult(
             inspection_url=inspection_url,
@@ -222,6 +227,7 @@ class GoogleURLInspectionClient:
             raw_response=raw_response,
             error_code=error_code,
             error_message=error_message,
+            retry_after_seconds=retry_after_seconds,
         )
 
     def inspect_url_sync(self, url: str, site_url: str) -> IndexStatusResult:
@@ -311,6 +317,7 @@ class GoogleURLInspectionClient:
                 raw_response=response,
                 error_code=None,
                 error_message=None,
+                retry_after_seconds=None,
             )
         except ValueError as error:
             return self._error_result(
@@ -327,6 +334,7 @@ class GoogleURLInspectionClient:
                 http_status=error.status_code,
                 error_code=_error_code_for_google_api_error(error),
                 error_message=error.message,
+                retry_after_seconds=error.retry_after_seconds,
             )
         except GoogleCredentialsError as error:
             _LOGGER.error(
@@ -345,10 +353,37 @@ class GoogleURLInspectionClient:
                 error_message=str(error),
             )
 
-    async def inspect_url(self, url: str, site_url: str) -> IndexStatusResult:
+    async def inspect_url(
+        self,
+        url: str,
+        site_url: str,
+        *,
+        website_id: UUID | None = None,
+        session: AsyncSession | None = None,
+        quota_discovery_service: QuotaDiscoveryService | None = None,
+    ) -> IndexStatusResult:
         """Async wrapper for URL inspection."""
 
-        return await asyncio.to_thread(self.inspect_url_sync, url, site_url)
+        result = await asyncio.to_thread(self.inspect_url_sync, url, site_url)
+        if website_id is None or session is None:
+            return result
+
+        discovery_service = quota_discovery_service or QuotaDiscoveryService()
+        if result.http_status == 429:
+            await discovery_service.record_429(
+                session=session,
+                website_id=website_id,
+                api_type="inspection",
+                retry_after_seconds=result.retry_after_seconds,
+            )
+            return result
+        if result.success:
+            await discovery_service.record_success(
+                session=session,
+                website_id=website_id,
+                api_type="inspection",
+            )
+        return result
 
 
 __all__ = [

@@ -17,6 +17,26 @@
   </article>
 </div>
 
+<div class="stats-grid coverage-grid">
+  <article class="stat-card">
+    <p>Index coverage</p>
+    <strong>{{ metrics.index_stats.indexed_count }} / {{ metrics.index_stats.total_urls }}</strong>
+    <p>{{ metrics.index_stats.coverage_percentage }}% indexed</p>
+  </article>
+  <article class="stat-card">
+    <p>Not indexed</p>
+    <strong>{{ metrics.index_stats.not_indexed_count }}</strong>
+  </article>
+  <article class="stat-card">
+    <p>Blocked + soft 404 + error</p>
+    <strong>{{ metrics.index_stats.blocked_count + metrics.index_stats.soft_404_count + metrics.index_stats.error_count }}</strong>
+  </article>
+  <article class="stat-card">
+    <p>Unchecked</p>
+    <strong>{{ metrics.index_stats.unchecked_count }}</strong>
+  </article>
+</div>
+
 <div class="panel chart-panel">
   <h2>Queue distribution by website</h2>
   <ul class="chart-list">
@@ -30,6 +50,23 @@
     </li>
     {% else %}
     <li>No queued URLs yet.</li>
+    {% endfor %}
+  </ul>
+</div>
+
+<div class="panel chart-panel">
+  <h2>Coverage by website</h2>
+  <ul class="chart-list">
+    {% for website in metrics.index_stats.per_website %}
+    <li>
+      <span>{{ website.domain }}</span>
+      <div class="bar-track">
+        <div class="bar-fill" style="--bar: {{ website.coverage_percentage }}%"></div>
+      </div>
+      <em>{{ website.indexed_count }} / {{ website.total_urls }} indexed ({{ website.coverage_percentage }}%)</em>
+    </li>
+    {% else %}
+    <li>No websites available.</li>
     {% endfor %}
   </ul>
 </div>

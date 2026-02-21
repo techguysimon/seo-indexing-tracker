@@ -1,0 +1,37 @@
+<section
+  id="system-status-container"
+  class="panel chart-panel"
+  hx-get="/web/partials/system-status"
+  hx-trigger="{{ refresh_trigger }}"
+  hx-swap="outerHTML"
+>
+  <h2>System status</h2>
+  <ul class="data-list">
+    <li>
+      <strong>URL submission</strong>
+      <span>{{ next_scheduled_runs.url_submission }}</span>
+    </li>
+    <li>
+      <strong>Index verification</strong>
+      <span>{{ next_scheduled_runs.index_verification }}</span>
+    </li>
+    <li>
+      <strong>Sitemap refresh</strong>
+      <span>{{ next_scheduled_runs.sitemap_refresh }}</span>
+    </li>
+  </ul>
+
+  <h2>Running jobs</h2>
+  <ul class="data-list">
+    {% for job in running_jobs %}
+    <li>
+      <strong>{{ job.job_name }}</strong>
+      <span>{{ job.job_id }}</span>
+      <span>Started {{ job.started_at.isoformat() }}</span>
+      <span>Processed {{ job.urls_processed }} URLs</span>
+    </li>
+    {% else %}
+    <li>No scheduler jobs are running.</li>
+    {% endfor %}
+  </ul>
+</section>

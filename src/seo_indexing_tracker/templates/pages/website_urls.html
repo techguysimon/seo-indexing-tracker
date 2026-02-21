@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} | SEO Indexing Tracker{% endblock %}
+
+{% block content %}
+<section class="hero-panel">
+  <h1>{{ page_title }}</h1>
+  <p>Review URL-level index inspection outcomes and export filtered results.</p>
+</section>
+
+<section class="panel">
+  <form class="filter-grid" method="get" action="/ui/websites/{{ website.id }}/urls">
+    <label>
+      Status
+      <select name="status">
+        <option value="">All statuses</option>
+        {% for status_option in status_options %}
+        <option value="{{ status_option.value }}" {% if filters.status and filters.status.value == status_option.value %}selected{% endif %}>{{ status_option.value }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      Sitemap
+      <select name="sitemap_id">
+        <option value="">All sitemaps</option>
+        {% for sitemap in sitemap_options %}
+        <option value="{{ sitemap.id }}" {% if filters.sitemap_id and filters.sitemap_id == sitemap.id %}selected{% endif %}>{{ sitemap.url }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      Search URL
+      <input type="search" name="search" value="{{ filters.search }}" placeholder="contains..." />
+    </label>
+    <label>
+      Page size
+      <select name="page_size">
+        {% for size in [50, 100, 200] %}
+        <option value="{{ size }}" {% if filters.page_size == size %}selected{% endif %}>{{ size }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="panel-button">Apply filters</button>
+    <a
+      class="panel-button panel-button-ghost"
+      href="/api/websites/{{ website.id }}/urls/export?status={{ filters.status.value if filters.status else '' }}&sitemap_id={{ filters.sitemap_id if filters.sitemap_id else '' }}&search={{ filters.search }}"
+    >
+      Export CSV
+    </a>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>URL</th>
+          <th>Status</th>
+          <th>Last Checked</th>
+          <th>Last Crawl Time</th>
+          <th>Coverage State</th>
+          <th>Canonical</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in listing.items %}
+        {% set canonical_mismatch = item.google_canonical and item.user_canonical and item.google_canonical != item.user_canonical %}
+        <tr>
+          <td class="url-cell-truncate" title="{{ item.url }}">{{ item.url }}</td>
+          <td>
+            <span class="status-badge status-{{ item.latest_index_status.value | lower | replace('_', '-') }}">
+              {{ item.latest_index_status.value }}
+            </span>
+          </td>
+          <td>{{ item.last_checked_at or "-" }}</td>
+          <td>{{ item.last_crawl_time or "-" }}</td>
+          <td>{{ item.coverage_state or "-" }}</td>
+          <td>
+            {% if canonical_mismatch %}
+            <span class="pill pill-warn">Mismatch</span>
+            <div class="canonical-notes">
+              <small>Google: {{ item.google_canonical }}</small>
+              <small>User: {{ item.user_canonical }}</small>
+            </div>
+            {% elif item.google_canonical or item.user_canonical %}
+            <small>{{ item.google_canonical or item.user_canonical }}</small>
+            {% else %}
+            -
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6">No URLs matched your filters.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination-row">
+    <span>
+      Page {{ listing.page }} of {{ listing.total_pages }}
+      ({{ listing.total_items }} total)
+    </span>
+    <div class="batch-actions">
+      {% if listing.page > 1 %}
+      <a
+        class="panel-button panel-button-ghost"
+        href="/ui/websites/{{ website.id }}/urls?status={{ filters.status.value if filters.status else '' }}&sitemap_id={{ filters.sitemap_id if filters.sitemap_id else '' }}&search={{ filters.search }}&page={{ listing.page - 1 }}&page_size={{ listing.page_size }}"
+      >
+        Previous
+      </a>
+      {% endif %}
+      {% if listing.page < listing.total_pages %}
+      <a
+        class="panel-button panel-button-ghost"
+        href="/ui/websites/{{ website.id }}/urls?status={{ filters.status.value if filters.status else '' }}&sitemap_id={{ filters.sitemap_id if filters.sitemap_id else '' }}&search={{ filters.search }}&page={{ listing.page + 1 }}&page_size={{ listing.page_size }}"
+      >
+        Next
+      </a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

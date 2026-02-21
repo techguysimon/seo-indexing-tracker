@@ -23,6 +23,23 @@ def _http_error(status: int, reason: str, content: str) -> HttpError:
     return HttpError(response, content.encode("utf-8"), uri=None)
 
 
+def _http_error_with_headers(
+    status: int,
+    reason: str,
+    content: str,
+    headers: dict[str, str],
+) -> HttpError:
+    class _ResponseWithHeaders:
+        def __init__(self) -> None:
+            self.status = status
+            self.reason = reason
+
+        def get(self, key: str) -> str | None:
+            return headers.get(key)
+
+    return HttpError(_ResponseWithHeaders(), content.encode("utf-8"), uri=None)
+
+
 def test_parse_google_http_error_extracts_quota_details() -> None:
     error = _http_error(
         429,
@@ -60,6 +77,19 @@ def test_parse_google_http_error_classifies_auth_and_invalid_url() -> None:
 
     assert isinstance(parsed_auth_error, AuthenticationError)
     assert isinstance(parsed_invalid_url_error, InvalidURLError)
+
+
+def test_parse_google_http_error_extracts_retry_after_header() -> None:
+    error = _http_error_with_headers(
+        429,
+        "Too Many Requests",
+        '{"error": {"message": "Quota exceeded"}}',
+        {"retry-after": "120"},
+    )
+
+    parsed_error = parse_google_http_error(error)
+
+    assert parsed_error.retry_after_seconds == 120
 
 
 def test_retry_decorator_retries_transient_google_http_error(
@@ -118,6 +148,7 @@ def test_is_retryable_google_error_returns_expected_value() -> None:
         details={"errors": [{"reason": "quotaExceeded"}]},
         operation="urlNotifications.publish",
         service="indexing",
+        retry_after_seconds=None,
     )
     non_retryable_error = InvalidURLError(
         "Invalid URL",
@@ -126,6 +157,7 @@ def test_is_retryable_google_error_returns_expected_value() -> None:
         details={"errors": [{"reason": "invalidArgument"}]},
         operation="urlNotifications.publish",
         service="indexing",
+        retry_after_seconds=None,
     )
 
     assert is_retryable_google_error(retryable_error) is True

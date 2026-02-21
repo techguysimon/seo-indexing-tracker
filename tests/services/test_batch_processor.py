@@ -80,6 +80,7 @@ class _FakeIndexingClient:
                         metadata=None,
                         error_code="QUOTA_EXCEEDED",
                         error_message="quota exhausted",
+                        retry_after_seconds=None,
                     )
                 )
                 continue
@@ -93,6 +94,7 @@ class _FakeIndexingClient:
                     metadata={"url": url},
                     error_code=None,
                     error_message=None,
+                    retry_after_seconds=None,
                 )
             )
 
@@ -123,6 +125,7 @@ class _FakeInspectionClient:
                 raw_response=None,
                 error_code="API_ERROR",
                 error_message="inspection failed",
+                retry_after_seconds=None,
             )
 
         return IndexStatusResult(
@@ -146,6 +149,7 @@ class _FakeInspectionClient:
             },
             error_code=None,
             error_message=None,
+            retry_after_seconds=None,
         )
 
 
