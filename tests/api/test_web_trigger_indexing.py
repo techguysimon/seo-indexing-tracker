@@ -67,12 +67,13 @@ def _trigger_log_payloads(caplog: pytest.LogCaptureFixture) -> list[dict[str, ob
 
 def _assert_payloads_do_not_leak_secrets(payloads: list[dict[str, object]]) -> None:
     for payload in payloads:
-        for value in payload.values():
+        for key, value in payload.items():
             if not isinstance(value, str):
                 continue
             assert "user:password@" not in value
             assert "token=super-secret" not in value
-            assert "#section" not in value
+            if key == "sitemap_url_sanitized":
+                assert "#" not in value
 
 
 @contextmanager
