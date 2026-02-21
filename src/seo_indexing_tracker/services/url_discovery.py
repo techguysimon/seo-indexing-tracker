@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
+import ipaddress
 import logging
+import socket
 from typing import Any, cast
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 from uuid import UUID
@@ -72,6 +75,7 @@ class URLDiscoveryProcessingError(Exception):
         sitemap_url: str,
         status_code: int | None = None,
         content_type: str | None = None,
+        reason: str | None = None,
     ) -> None:
         self.stage = stage
         self.website_id = website_id
@@ -79,8 +83,10 @@ class URLDiscoveryProcessingError(Exception):
         self.sitemap_url = sitemap_url
         self.status_code = status_code
         self.content_type = content_type
+        self.reason = reason
+        reason_suffix = f": {reason}" if reason else ""
         super().__init__(
-            f"URL discovery failed at stage={stage} for sitemap {sitemap_id}"
+            f"URL discovery failed at stage={stage} for sitemap {sitemap_id}{reason_suffix}"
         )
 
 
@@ -204,6 +210,65 @@ def _normalize_datetime(value: datetime | None) -> datetime | None:
     return value.astimezone(UTC)
 
 
+def _is_disallowed_ip_address(
+    ip_address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> bool:
+    return (
+        ip_address.is_private
+        or ip_address.is_loopback
+        or ip_address.is_link_local
+        or ip_address.is_reserved
+        or ip_address.is_multicast
+        or ip_address.is_unspecified
+    )
+
+
+async def _resolve_host_ip_addresses(
+    host_name: str,
+) -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    loop = asyncio.get_running_loop()
+    try:
+        host_addresses = await loop.getaddrinfo(
+            host_name,
+            None,
+            family=socket.AF_UNSPEC,
+            type=socket.SOCK_STREAM,
+            proto=socket.IPPROTO_TCP,
+        )
+    except socket.gaierror as exc:
+        raise ValueError("host_dns_resolution_failed") from exc
+
+    resolved_ip_addresses: set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()
+    for _, _, _, _, sockaddr in host_addresses:
+        resolved_ip_addresses.add(ipaddress.ip_address(sockaddr[0]))
+
+    if not resolved_ip_addresses:
+        raise ValueError("host_dns_resolution_failed")
+
+    return resolved_ip_addresses
+
+
+async def _validate_child_sitemap_url_for_fetch(child_sitemap_url: str) -> None:
+    parsed_child_sitemap_url = urlsplit(child_sitemap_url.strip())
+    if parsed_child_sitemap_url.scheme.lower() not in {"http", "https"}:
+        raise ValueError("unsupported_scheme")
+
+    host_name = parsed_child_sitemap_url.hostname
+    if not host_name:
+        raise ValueError("missing_host")
+
+    try:
+        resolved_ip_addresses = {ipaddress.ip_address(host_name)}
+    except ValueError:
+        resolved_ip_addresses = await _resolve_host_ip_addresses(host_name)
+
+    for resolved_ip_address in sorted(resolved_ip_addresses, key=str):
+        if _is_disallowed_ip_address(resolved_ip_address):
+            raise ValueError(
+                f"resolved_to_disallowed_ip:{resolved_ip_address.compressed}"
+            )
+
+
 class URLDiscoveryService:
     """Discover sitemap URLs and classify changes from lastmod metadata."""
 
@@ -309,7 +374,15 @@ class URLDiscoveryService:
                 ) from exc
 
             next_depth = sitemap_document.depth + 1
-            if child_sitemap_urls and next_depth > self._index_max_depth:
+            new_child_sitemap_urls: list[str] = []
+            for child_sitemap_url in child_sitemap_urls:
+                canonical_child_sitemap_url = _canonicalize_url(child_sitemap_url)
+                if canonical_child_sitemap_url in seen_sitemap_urls:
+                    continue
+                new_child_sitemap_urls.append(child_sitemap_url)
+                seen_sitemap_urls.add(canonical_child_sitemap_url)
+
+            if new_child_sitemap_urls and next_depth > self._index_max_depth:
                 raise URLDiscoveryProcessingError(
                     stage="index_depth_limit",
                     website_id=root_sitemap.website_id,
@@ -319,12 +392,7 @@ class URLDiscoveryService:
                     content_type=sitemap_document.content_type,
                 )
 
-            for child_sitemap_url in child_sitemap_urls:
-                canonical_child_sitemap_url = _canonicalize_url(child_sitemap_url)
-                if canonical_child_sitemap_url in seen_sitemap_urls:
-                    continue
-
-                seen_sitemap_urls.add(canonical_child_sitemap_url)
+            for child_sitemap_url in new_child_sitemap_urls:
                 discovered_child_sitemap_count += 1
                 if discovered_child_sitemap_count > self._index_child_max_count:
                     raise URLDiscoveryProcessingError(
@@ -337,20 +405,28 @@ class URLDiscoveryService:
                     )
 
                 try:
+                    await _validate_child_sitemap_url_for_fetch(child_sitemap_url)
+                except ValueError as exc:
+                    raise URLDiscoveryProcessingError(
+                        stage="fetch_child_policy",
+                        website_id=root_sitemap.website_id,
+                        sitemap_id=root_sitemap.id,
+                        sitemap_url=child_sitemap_url,
+                        reason=str(exc),
+                    ) from exc
+
+                try:
                     child_fetch_result = await fetch_sitemap(child_sitemap_url)
-                except SitemapFetchError:
-                    logger.warning(
-                        {
-                            "event": "url_discovery_failed",
-                            "website_id": str(root_sitemap.website_id),
-                            "sitemap_id": str(root_sitemap.id),
-                            "sitemap_url_sanitized": _sanitize_sitemap_url(
-                                child_sitemap_url
-                            ),
-                            "stage": "fetch_child",
-                        }
-                    )
-                    raise
+                except SitemapFetchError as exc:
+                    raise URLDiscoveryProcessingError(
+                        stage="fetch_child",
+                        website_id=root_sitemap.website_id,
+                        sitemap_id=root_sitemap.id,
+                        sitemap_url=child_sitemap_url,
+                        status_code=getattr(exc, "status_code", None),
+                        content_type=getattr(exc, "content_type", None),
+                        reason=exc.__class__.__name__,
+                    ) from exc
 
                 if child_fetch_result.content is None:
                     raise URLDiscoveryProcessingError(
@@ -433,6 +509,7 @@ class URLDiscoveryService:
                         "exception_class": exc.__class__.__name__,
                         "http_status": exc.status_code,
                         "content_type": exc.content_type,
+                        "reason": exc.reason,
                     }
                 )
                 raise
