@@ -426,6 +426,22 @@ async def _render_website_detail(
     )
 
 
+async def _rollback_and_render_website_detail(
+    *,
+    request: Request,
+    session: AsyncSession,
+    website_id: UUID,
+    feedback: str,
+) -> Response:
+    await session.rollback()
+    return await _render_website_detail(
+        request=request,
+        session=session,
+        website_id=website_id,
+        feedback=feedback,
+    )
+
+
 def _table_context(
     *,
     filters: QueueFilters,
@@ -974,7 +990,7 @@ async def trigger_indexing(
             safe_error_url = (
                 _safe_sitemap_url_for_feedback(error_url) if error_url else None
             )
-            _trigger_logger.exception(
+            _trigger_logger.error(
                 {
                     "event": "trigger_indexing_failed",
                     "website_id": str(website_id),
@@ -990,14 +1006,14 @@ async def trigger_indexing(
                 error=error,
                 safe_sitemap_url=safe_error_url or safe_sitemap_url,
             )
-            return await _render_website_detail(
+            return await _rollback_and_render_website_detail(
                 request=request,
                 session=session,
                 website_id=website_id,
                 feedback=feedback,
             )
         except URLDiscoveryProcessingError as error:
-            _trigger_logger.exception(
+            _trigger_logger.error(
                 {
                     "event": "trigger_indexing_failed",
                     "website_id": str(website_id),
@@ -1013,7 +1029,7 @@ async def trigger_indexing(
                 error=error,
                 safe_sitemap_url=safe_sitemap_url,
             )
-            return await _render_website_detail(
+            return await _rollback_and_render_website_detail(
                 request=request,
                 session=session,
                 website_id=website_id,
@@ -1026,7 +1042,7 @@ async def trigger_indexing(
     try:
         queued_urls = await queue_service.enqueue_many(website_url_ids)
     except Exception as error:
-        _trigger_logger.exception(
+        _trigger_logger.error(
             {
                 "event": "trigger_indexing_failed",
                 "website_id": str(website_id),
@@ -1038,7 +1054,7 @@ async def trigger_indexing(
                 "content_type": None,
             }
         )
-        return await _render_website_detail(
+        return await _rollback_and_render_website_detail(
             request=request,
             session=session,
             website_id=website_id,

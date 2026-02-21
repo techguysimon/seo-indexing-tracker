@@ -262,7 +262,7 @@ async def fetch_sitemap(
                         content_type=exc.response.headers.get("content-type"),
                     ) from exc
             except httpx.HTTPError as exc:
-                _logger.exception(
+                _logger.error(
                     {
                         "event": "sitemap_fetch_http_error",
                         "stage": "fetch",
