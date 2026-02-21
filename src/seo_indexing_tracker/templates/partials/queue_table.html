@@ -28,7 +28,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for item in queue_data.items %}
+        {% for item in queue_data['items'] %}
         <tr>
           <td><input type="checkbox" name="url_ids" value="{{ item.id }}" form="batch-form" /></td>
           <td>{{ item.website_domain }}</td>
