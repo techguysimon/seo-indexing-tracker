@@ -8,6 +8,7 @@ from typing import Final
 
 import httpx
 
+from seo_indexing_tracker.config import get_settings
 from seo_indexing_tracker.services.sitemap_decompressor import (
     SitemapDecompressionError,
     decompress_gzipped_content,
@@ -22,20 +23,10 @@ TRANSIENT_HTTP_STATUS_CODES: Final[frozenset[int]] = frozenset(
     {408, 425, 429, 500, 502, 503, 504}
 )
 PRIMARY_BROWSER_HEADERS: Final[dict[str, str]] = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/133.0.0.0 Safari/537.36"
-    ),
     "Accept": "application/xml,text/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
 ALTERNATE_BROWSER_HEADERS: Final[dict[str, str]] = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-        "Version/18.3 Safari/605.1.15"
-    ),
     "Accept": "application/xml,text/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-GB,en;q=0.8",
 }
@@ -101,13 +92,22 @@ async def _get_sitemap_with_403_retry(
     client: httpx.AsyncClient,
     url: str,
     conditional_headers: dict[str, str],
+    user_agent: str,
 ) -> httpx.Response:
-    primary_headers = {**PRIMARY_BROWSER_HEADERS, **conditional_headers}
+    primary_headers = {
+        "User-Agent": user_agent,
+        **PRIMARY_BROWSER_HEADERS,
+        **conditional_headers,
+    }
     response = await client.get(url, headers=primary_headers)
     if response.status_code != httpx.codes.FORBIDDEN:
         return response
 
-    alternate_headers = {**ALTERNATE_BROWSER_HEADERS, **conditional_headers}
+    alternate_headers = {
+        "User-Agent": user_agent,
+        **ALTERNATE_BROWSER_HEADERS,
+        **conditional_headers,
+    }
     return await client.get(url, headers=alternate_headers)
 
 
@@ -120,6 +120,7 @@ async def fetch_sitemap(
     max_redirects: int = DEFAULT_MAX_REDIRECTS,
     max_retries: int = DEFAULT_MAX_RETRIES,
     backoff_base_seconds: float = DEFAULT_BACKOFF_BASE_SECONDS,
+    user_agent: str | None = None,
 ) -> SitemapFetchResult:
     """Fetch a sitemap URL asynchronously with retries and conditional headers."""
 
@@ -137,6 +138,7 @@ async def fetch_sitemap(
 
     headers = _build_conditional_headers(etag=etag, last_modified=last_modified)
     timeout = httpx.Timeout(timeout_seconds)
+    request_user_agent = user_agent or get_settings().OUTBOUND_HTTP_USER_AGENT
 
     async with httpx.AsyncClient(
         timeout=timeout,
@@ -149,6 +151,7 @@ async def fetch_sitemap(
                     client=client,
                     url=url,
                     conditional_headers=headers,
+                    user_agent=request_user_agent,
                 )
 
                 if response.status_code == httpx.codes.NOT_MODIFIED:

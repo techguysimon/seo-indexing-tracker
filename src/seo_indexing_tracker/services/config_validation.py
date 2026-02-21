@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 
 import httpx
 
+from seo_indexing_tracker.config import get_settings
 from seo_indexing_tracker.services.google_credentials import (
     GoogleCredentialsError,
     load_service_account_credentials,
@@ -15,6 +17,8 @@ from seo_indexing_tracker.services.google_credentials import (
 
 DEFAULT_CONFIG_VALIDATION_TIMEOUT_SECONDS = 10.0
 DEFAULT_CONFIG_VALIDATION_MAX_REDIRECTS = 5
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigurationValidationError(Exception):
@@ -30,6 +34,7 @@ class ConfigurationValidationService:
         http_client: httpx.AsyncClient | None = None,
         timeout_seconds: float = DEFAULT_CONFIG_VALIDATION_TIMEOUT_SECONDS,
         max_redirects: int = DEFAULT_CONFIG_VALIDATION_MAX_REDIRECTS,
+        user_agent: str | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be greater than zero")
@@ -40,6 +45,7 @@ class ConfigurationValidationService:
         self._http_client = http_client
         self._timeout_seconds = timeout_seconds
         self._max_redirects = max_redirects
+        self._user_agent = user_agent or get_settings().OUTBOUND_HTTP_USER_AGENT
 
     async def validate_service_account(
         self,
@@ -107,6 +113,7 @@ class ConfigurationValidationService:
             )
 
             if response.status_code in {
+                httpx.codes.FORBIDDEN,
                 httpx.codes.METHOD_NOT_ALLOWED,
                 httpx.codes.NOT_IMPLEMENTED,
             }:
@@ -119,6 +126,14 @@ class ConfigurationValidationService:
                 )
 
             if response.status_code < 400:
+                return
+
+            if response.status_code == httpx.codes.FORBIDDEN:
+                logger.warning(
+                    "%s returned HTTP 403 during reachability validation; allowing configuration: %s",
+                    resource_name,
+                    url,
+                )
                 return
 
             raise ConfigurationValidationError(
@@ -135,7 +150,11 @@ class ConfigurationValidationService:
         resource_name: str,
     ) -> httpx.Response:
         try:
-            return await http_client.request(method, url)
+            return await http_client.request(
+                method,
+                url,
+                headers={"User-Agent": self._user_agent},
+            )
         except httpx.InvalidURL as error:
             raise ConfigurationValidationError(
                 f"{field_name} must be a valid HTTP URL: {error}"
