@@ -77,6 +77,8 @@ uv run seo-indexing-tracker
 - Web UI: http://localhost:8000
 - Health check: http://localhost:8000/health
 
+> **Deployment security**: Web UI and admin routes are unauthenticated by default. Protect them externally (for example: reverse-proxy auth, network ACLs, VPN, or private ingress).
+
 ### UI Setup Workflow
 
 Use the UI for end-to-end setup and operations:
@@ -155,11 +157,11 @@ uv run typecheck
 ## Sitemap Fetching and Trigger Diagnostics
 
 - Outbound sitemap/config validation requests use `OUTBOUND_HTTP_USER_AGENT`.
-- Form parsing in web UI routes depends on `python-multipart` (installed by `uv sync --extra dev`).
+- Form parsing in web UI routes depends on `python-multipart` (included in base dependencies).
 - Sitemap fetcher retries 403 responses with alternate browser-like headers before failing.
 - Gzip/content-encoding mismatches are handled defensively; invalid compressed payloads fail with explicit fetch errors.
-- Trigger indexing feedback is stage-aware (`fetch`, discovery stages such as `parse`/policy stages, and `enqueue`).
-- Logs sanitize sitemap URLs to host/path form (`sitemap_url_sanitized`) to avoid leaking secrets in query strings.
+- Trigger indexing UI feedback is category-level (`fetch`, `parse`, `discovery`, `enqueue`); discovery details may be generalized except parse-specific errors.
+- Logs include detailed stage metadata and sanitize sitemap URLs to host/path form (`sitemap_url_sanitized`) to avoid leaking secrets in query strings.
 
 ## Sitemap Child Traversal Security Model
 

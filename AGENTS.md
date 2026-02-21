@@ -177,6 +177,8 @@ All settings are defined in `src/seo_indexing_tracker/config.py` and loaded from
 
 `python-multipart` is required for form parsing in web UI routes (`request.form()`). It is installed via project dependencies.
 
+Web UI and admin routes are unauthenticated by default. In deployed environments, require external protections (reverse proxy auth, network ACLs, VPN, private ingress, etc.).
+
 ## Architectural Patterns
 
 ### Async/Await
@@ -216,7 +218,7 @@ Treat sitemap fetch policy as security-sensitive code:
   - explicit redirect handling with per-hop validation
   - pinned connect IPs with validated fallback IP retries
   - fail-closed behavior if connect destination metadata is unavailable
-- Keep trigger diagnostics stage-based and URL-sanitized in `api/web.py` (`sitemap_url_sanitized`).
+- Keep trigger diagnostics aligned with runtime behavior: detailed stage metadata in logs, category-level UI feedback (`fetch`/`parse`/`discovery`/`enqueue`), and URL sanitization via `sitemap_url_sanitized`.
 
 ## Testing Guidelines
 

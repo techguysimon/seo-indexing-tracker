@@ -134,13 +134,17 @@ When a sitemap is a `<sitemapindex>`, child sitemap traversal is guarded by stri
 
 ### Trigger Indexing Diagnostics
 
-Manual trigger indexing reports and logs failures by stage so operators can act quickly:
+Manual trigger indexing diagnostics are split between logs and user-facing feedback:
 
-- `fetch` for sitemap retrieval/HTTP problems
-- discovery processing stages such as `parse`, `index_depth_limit`, `index_child_limit`, `fetch_child_policy`, `fetch_child`
-- `enqueue` when queue persistence fails after discovery
+- Structured logs include detailed stage metadata (for example discovery internals like policy/depth/child-fetch stages).
+- User-facing trigger feedback is category-level: `fetch`, `parse`, `discovery`, `enqueue`.
+- Discovery details shown to users may be generalized except parse-specific failures.
 
 Structured logs use `sitemap_url_sanitized` (host/path only) for safer diagnostics.
+
+### Deployment Authentication Boundary
+
+Web UI and admin routes are unauthenticated by default. Deploy behind external controls such as reverse-proxy auth, network ACLs, VPN, or private ingress.
 
 ### 2. Indexing Submission Flow
 

@@ -7,7 +7,7 @@ Get up and running with SEO Indexing Tracker in minutes.
 - Google Cloud Project with Indexing API + Search Console API enabled
 - Service account JSON key file
 - Service account added as Owner in Google Search Console
-- Python dependencies installed with `uv sync --extra dev` (includes `python-multipart` required for UI form posts)
+- Python dependencies installed (`python-multipart` is in base dependencies for UI form posts)
 
 ## Required Environment
 
@@ -52,7 +52,7 @@ On the same website detail page:
 
 On the website detail page, click **Trigger indexing**.
 
-This runs discovery and enqueue in one action and returns stage-aware feedback if something fails.
+This runs discovery and enqueue in one action. UI feedback is category-level (`fetch`, `parse`, `discovery`, `enqueue`), and discovery details may be generalized except parse-specific errors.
 
 ### Step 5: Manage Queue
 
@@ -127,6 +127,7 @@ If you prefer, scheduled jobs will handle everything automatically:
 - Website domain and sitemap URLs must be publicly accessible
 - Queue trigger endpoint requires `SECRET_KEY` authorization header
 - Access the web UI at http://localhost:8000
+- Web UI and admin routes are unauthenticated by default; protect them externally (reverse-proxy auth, network ACLs, VPN, private ingress)
 - Sitemap fetcher retries 403 responses once with alternate browser-like headers
-- Trigger indexing logs and UI errors are grouped by stage (`fetch`, discovery processing, `enqueue`)
+- Trigger indexing logs include detailed stage metadata; UI errors are category-level (`fetch`, `parse`, `discovery`, `enqueue`)
 - Sitemap child traversal (from sitemap indexes) enforces strict SSRF protections and fail-closed behavior
