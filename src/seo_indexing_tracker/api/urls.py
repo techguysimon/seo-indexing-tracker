@@ -27,12 +27,28 @@ from seo_indexing_tracker.models import (
 router = APIRouter(prefix="/api/websites/{website_id}/urls", tags=["urls"])
 
 
+def _normalize_url_for_comparison(url: str) -> str:
+    """Normalize URL for canonical comparison.
+
+    Handles trailing slash differences and case sensitivity.
+    """
+    if not url:
+        return ""
+    # Strip trailing slash (except for root)
+    if url.endswith("/") and not url.endswith("://") and url.count("/") > 2:
+        url = url.rstrip("/")
+    # Lowercase
+    url = url.lower()
+    return url
+
+
 class WebsiteURLListItem(BaseModel):
     """Website URL listing record with latest inspection summary."""
 
     url: str
     latest_index_status: URLIndexStatus
     last_checked_at: datetime | None
+    last_submitted_at: datetime | None
     sitemap_id: UUID | None
     verdict: IndexVerdict | None
     coverage_state: str | None
@@ -138,6 +154,7 @@ async def fetch_website_urls(
             URL.url,
             URL.latest_index_status,
             URL.last_checked_at,
+            URL.last_submitted_at,
             URL.sitemap_id,
             IndexStatus.verdict,
             IndexStatus.coverage_state,
@@ -168,6 +185,7 @@ async def fetch_website_urls(
             url=row.url,
             latest_index_status=row.latest_index_status,
             last_checked_at=row.last_checked_at,
+            last_submitted_at=row.last_submitted_at,
             sitemap_id=row.sitemap_id,
             verdict=row.verdict,
             coverage_state=row.coverage_state,
@@ -240,6 +258,7 @@ async def export_website_urls(
         [
             "url",
             "latest_index_status",
+            "last_submitted_at",
             "last_checked_at",
             "sitemap_id",
             "verdict",
@@ -254,12 +273,14 @@ async def export_website_urls(
         canonical_mismatch = bool(
             item.google_canonical
             and item.user_canonical
-            and item.google_canonical != item.user_canonical
+            and _normalize_url_for_comparison(item.google_canonical)
+            != _normalize_url_for_comparison(item.user_canonical)
         )
         writer.writerow(
             [
                 item.url,
                 item.latest_index_status.value,
+                item.last_submitted_at.isoformat() if item.last_submitted_at else "",
                 item.last_checked_at.isoformat() if item.last_checked_at else "",
                 str(item.sitemap_id) if item.sitemap_id else "",
                 item.verdict.value if item.verdict else "",

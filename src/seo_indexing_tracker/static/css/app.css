@@ -348,6 +348,44 @@ td {
   background: #c2751a;
 }
 
+.pill-success {
+  color: #fff;
+  background: #2f7e52;
+}
+
+.pill-danger {
+  color: #fff;
+  background: var(--danger);
+}
+
+.pill-info {
+  color: #fff;
+  background: #2773b9;
+}
+
+.text-muted {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.spinner {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 0.3em;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .status-badge {
   display: inline-flex;
   width: fit-content;

@@ -30,6 +30,7 @@ from seo_indexing_tracker.models import (
     JobExecution,
     ServiceAccount,
     Sitemap,
+    SitemapRefreshProgress,
     SitemapType,
     URL,
     URLIndexStatus,
@@ -510,6 +511,30 @@ async def _fetch_website_with_details(
     return website
 
 
+async def _fetch_sitemap_progress_by_sitemap_ids(
+    *,
+    session: AsyncSession,
+    sitemap_ids: list[UUID],
+) -> dict[UUID, SitemapRefreshProgress]:
+    """Fetch progress records indexed by sitemap ID."""
+    if not sitemap_ids:
+        return {}
+
+    rows = (
+        (
+            await session.execute(
+                select(SitemapRefreshProgress).where(
+                    SitemapRefreshProgress.sitemap_id.in_(sitemap_ids)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return {row.sitemap_id: row for row in rows}
+
+
 async def _render_website_detail(
     *,
     request: Request,
@@ -525,15 +550,23 @@ async def _render_website_detail(
             detail="Website not found",
         )
 
+    sitemaps = sorted(
+        website.sitemaps,
+        key=lambda sitemap: sitemap.created_at,
+        reverse=True,
+    )
+    sitemap_ids = [s.id for s in sitemaps]
+    sitemap_progress = await _fetch_sitemap_progress_by_sitemap_ids(
+        session=session,
+        sitemap_ids=sitemap_ids,
+    )
+
     context = {
         "page_title": f"{website.domain} Setup",
         "website": website,
         "service_account": website.service_account,
-        "sitemaps": sorted(
-            website.sitemaps,
-            key=lambda sitemap: sitemap.created_at,
-            reverse=True,
-        ),
+        "sitemaps": sitemaps,
+        "sitemap_progress": sitemap_progress,
         "sitemap_types": [SitemapType.URLSET.value, SitemapType.INDEX.value],
         "feedback": feedback,
         "index_stats": await IndexStatsService.get_website_index_stats(

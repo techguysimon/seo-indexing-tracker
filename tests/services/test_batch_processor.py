@@ -264,10 +264,65 @@ async def test_batch_processor_skips_already_indexed_urls_without_manual_overrid
             self.submitted_urls.extend(urls)
             return await super().batch_submit(urls, action)
 
+    class _SmartInspectionClient:
+        """Inspection client that returns appropriate coverage_state based on URL."""
+
+        async def inspect_url(self, url: str, site_url: str) -> IndexStatusResult:
+            # URLs ending with "/indexed" or "/force-resubmit" should show as indexed
+            if url.endswith("/indexed") or url.endswith("/force-resubmit"):
+                return IndexStatusResult(
+                    inspection_url=url,
+                    site_url=site_url,
+                    success=True,
+                    http_status=200,
+                    system_status=InspectionSystemStatus.INDEXED,
+                    verdict="PASS",
+                    coverage_state="Indexed",
+                    last_crawl_time=datetime(2026, 2, 20, 9, 0, tzinfo=UTC),
+                    indexing_state="INDEXING_ALLOWED",
+                    robots_txt_state="ALLOWED",
+                    raw_response={
+                        "inspectionResult": {
+                            "indexStatusResult": {
+                                "googleCanonical": url,
+                                "userCanonical": url,
+                            }
+                        }
+                    },
+                    error_code=None,
+                    error_message=None,
+                    retry_after_seconds=None,
+                )
+
+            # Other URLs (like /not-indexed) should show as not indexed
+            return IndexStatusResult(
+                inspection_url=url,
+                site_url=site_url,
+                success=True,
+                http_status=200,
+                system_status=InspectionSystemStatus.NOT_INDEXED,
+                verdict="NEUTRAL",
+                coverage_state="URL is not indexed",
+                last_crawl_time=None,
+                indexing_state="INDEXING_ALLOWED",
+                robots_txt_state="ALLOWED",
+                raw_response={
+                    "inspectionResult": {
+                        "indexStatusResult": {
+                            "googleCanonical": None,
+                            "userCanonical": url,
+                        }
+                    }
+                },
+                error_code=None,
+                error_message=None,
+                retry_after_seconds=None,
+            )
+
     class _TrackingClientBundle:
         def __init__(self) -> None:
             self.indexing = _TrackingIndexingClient()
-            self.search_console = _FakeInspectionClient()
+            self.search_console = _SmartInspectionClient()
 
     class _TrackingClientFactory:
         def __init__(self) -> None:
@@ -406,27 +461,32 @@ async def test_batch_processor_handles_partial_failures_and_requeues(
         progress_callback=capture_progress,
     )
 
+    # With verify-first: URLs with "Submitted and indexed" coverage_state are skipped
+    # because they're already indexed. Only inspection failures fall back to submission.
     assert result.status == BatchProcessorStatus.PARTIAL_FAILURE
     assert result.dequeued_urls == 3
-    assert result.submitted_urls == 3
-    assert result.submission_success_count == 2
-    assert result.submission_failure_count == 1
-    assert result.inspected_urls == 2
-    assert result.inspection_success_count == 1
+    assert result.submitted_urls == 1  # Only inspect-fail URL submitted (fallback)
+    assert result.submission_success_count == 1
+    assert result.submission_failure_count == 0
+    # Verify-first: ALL dequeued URLs are inspected first
+    assert result.inspected_urls == 3
+    assert result.inspection_success_count == 2
     assert result.inspection_failure_count == 1
-    assert result.requeued_urls == 2
+    assert result.requeued_urls == 1  # Only inspect-fail URL (inspection failed)
+    # Verify-first: stages are now dequeue → inspect (2 batches) → submit → completed
     assert [update.stage for update in progress_updates] == [
         "dequeue",
-        "submit",
         "inspect",
+        "inspect",
+        "submit",
         "completed",
     ]
+    # Verify-first: inspections happen first, then only 1 submission (fallback for inspect-fail)
     assert rate_limiter.acquired_api_types == [
-        "indexing",
-        "indexing",
-        "indexing",
         "inspection",
         "inspection",
+        "inspection",
+        "indexing",  # Only 1 indexing call for inspect-fail URL
     ]
 
     async with scoped_session() as session:
@@ -439,6 +499,7 @@ async def test_batch_processor_handles_partial_failures_and_requeues(
             .scalars()
             .all()
         )
+        # 2 skipped + 1 submitted = 3 logs
         assert len(submission_logs) == 3
 
         index_statuses = (
@@ -450,7 +511,8 @@ async def test_batch_processor_handles_partial_failures_and_requeues(
             .scalars()
             .all()
         )
-        assert len(index_statuses) == 2
+        # Verify-first: ALL dequeued URLs get inspected, so 3 IndexStatus records
+        assert len(index_statuses) == 3
 
         persisted_urls = {
             row.url: row
@@ -461,8 +523,9 @@ async def test_batch_processor_handles_partial_failures_and_requeues(
             .all()
         }
 
+    # /success and /submit-fail are skipped (already indexed), /inspect-fail is requeued
     assert persisted_urls["https://example.com/success"].current_priority == 0.0
-    assert persisted_urls["https://example.com/submit-fail"].current_priority > 0.0
+    assert persisted_urls["https://example.com/submit-fail"].current_priority == 0.0
     assert persisted_urls["https://example.com/inspect-fail"].current_priority > 0.0
 
     await engine.dispose()

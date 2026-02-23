@@ -74,8 +74,28 @@ class ConfigurationValidationService:
         return sitemap_url
 
     async def validate_website_url(self, *, site_url: str) -> str:
-        """Validate website URL accessibility by issuing an HTTP HEAD request."""
+        """Validate website URL accessibility by issuing an HTTP HEAD request.
 
+        Accepts two formats:
+        - Normal URLs: https://domain.com (validates via HTTP request)
+        - Domain properties: sc-domain:domain.com (validates format only)
+        """
+
+        # Domain properties (sc-domain:example.com) don't need HTTP reachability check
+        if site_url.lower().startswith("sc-domain:"):
+            domain_part = site_url[10:].strip()  # Extract domain after "sc-domain:"
+            if not domain_part:
+                raise ConfigurationValidationError(
+                    "sc-domain: format requires a domain name (e.g., sc-domain:example.com)"
+                )
+            # Basic domain validation - should have at least one dot
+            if "." not in domain_part:
+                raise ConfigurationValidationError(
+                    f"Invalid domain in sc-domain: format: {domain_part}"
+                )
+            return site_url
+
+        # Normal URLs require HTTP reachability validation
         await self._validate_url_reachable(
             url=site_url,
             field_name="site_url",

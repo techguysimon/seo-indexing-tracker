@@ -122,12 +122,34 @@
 
   <ul class="data-list">
     {% for sitemap in sitemaps %}
+    {%- set progress = sitemap_progress.get(sitemap.id) -%}
     <li>
       <strong>{{ sitemap.url }}</strong>
       <span>Type: {{ sitemap.sitemap_type.value }}</span>
       <span class="pill {% if sitemap.is_active %}pill-ok{% else %}pill-dim{% endif %}">
         {% if sitemap.is_active %}Active{% else %}Inactive{% endif %}
       </span>
+      
+      {%- if progress -%}
+      {%- if progress.status == "complete" -%}
+      <span class="pill pill-success">✓ complete</span>
+      {%- elif progress.status == "error" -%}
+      <span class="pill pill-danger" {% if progress.errors %}title="{{ progress.errors }}"{% endif %}>✗ error{% if progress.errors %}: {{ progress.errors[:50] }}{% if progress.errors|length > 50 %}...{% endif %}{% endif %}</span>
+      {%- elif progress.status in ("fetching", "parsing", "discovering") -%}
+      <span class="pill pill-info"><span class="spinner"></span> {{ progress.status }}</span>
+      {%- else -%}
+      <span class="pill pill-dim">{{ progress.status }}</span>
+      {%- endif -%}
+      
+      {%- if progress.status == "complete" and progress.urls_found > 0 -%}
+      <span class="text-muted">URLs: {{ "{:,}".format(progress.urls_found) }} ({{ "{:,}".format(progress.urls_new) }} new, {{ "{:,}".format(progress.urls_modified) }} modified)</span>
+      {%- endif -%}
+      
+      <span class="text-muted">Last refresh: {{ progress.updated_at|datetime_relative }}</span>
+      {%- else -%}
+      <span class="pill pill-dim">Not refreshed</span>
+      {%- endif -%}
+      
       <form
         class="inline-form"
         action="/ui/sitemaps/{{ sitemap.id }}/delete"

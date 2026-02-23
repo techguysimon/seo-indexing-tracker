@@ -2,6 +2,16 @@
 
 {% block title %}{{ page_title }} | SEO Indexing Tracker{% endblock %}
 
+{%- macro url_query_params(status, sitemap_id, search, page, page_size) -%}
+  {%- set params = [] -%}
+  {%- if status %}{% set _ = params.append('status=' ~ status.value) %}{% endif -%}
+  {%- if sitemap_id %}{% set _ = params.append('sitemap_id=' ~ sitemap_id) %}{% endif -%}
+  {%- if search %}{% set _ = params.append('search=' ~ search | urlencode) %}{% endif -%}
+  {%- if page and page != 1 %}{% set _ = params.append('page=' ~ page) %}{% endif -%}
+  {%- if page_size and page_size != 50 %}{% set _ = params.append('page_size=' ~ page_size) %}{% endif -%}
+  {%- if params %}?{{ params | join('&') }}{% endif -%}
+{%- endmacro -%}
+
 {% block content %}
 <section class="hero-panel">
   <h1>{{ page_title }}</h1>
@@ -9,7 +19,12 @@
 </section>
 
 <section class="panel">
-  <form class="filter-grid" method="get" action="/ui/websites/{{ website.id }}/urls">
+  <form
+    class="filter-grid"
+    method="get"
+    action="/ui/websites/{{ website.id }}/urls"
+    onsubmit="event.preventDefault(); const fd = new FormData(this); const params = new URLSearchParams(); fd.forEach((v, k) => { if (v) params.append(k, v); }); const qs = params.toString(); window.location.href = this.action + (qs ? '?' + qs : '');"
+  >
     <label>
       Status
       <select name="status">
@@ -43,7 +58,7 @@
     <button type="submit" class="panel-button">Apply filters</button>
     <a
       class="panel-button panel-button-ghost"
-      href="/api/websites/{{ website.id }}/urls/export?status={{ filters.status.value if filters.status else '' }}&sitemap_id={{ filters.sitemap_id if filters.sitemap_id else '' }}&search={{ filters.search }}"
+      href="/api/websites/{{ website.id }}/urls/export{{ url_query_params(filters.status, filters.sitemap_id, filters.search, None, None) }}"
     >
       Export CSV
     </a>
@@ -57,6 +72,7 @@
         <tr>
           <th>URL</th>
           <th>Status</th>
+          <th>Submission</th>
           <th>Last Checked</th>
           <th>Last Crawl Time</th>
           <th>Coverage State</th>
@@ -72,6 +88,14 @@
             <span class="status-badge status-{{ item.latest_index_status.value | lower | replace('_', '-') }}">
               {{ item.latest_index_status.value }}
             </span>
+          </td>
+          <td>
+            {% if item.last_submitted_at %}
+            <span class="pill pill-success">Submitted</span>
+            <small>{{ item.last_submitted_at.strftime('%Y-%m-%d %H:%M') }}</small>
+            {% else %}
+            <span class="pill">Not submitted</span>
+            {% endif %}
           </td>
           <td>{{ item.last_checked_at or "-" }}</td>
           <td>{{ item.last_crawl_time or "-" }}</td>
@@ -92,7 +116,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="6">No URLs matched your filters.</td>
+          <td colspan="7">No URLs matched your filters.</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -108,7 +132,7 @@
       {% if listing.page > 1 %}
       <a
         class="panel-button panel-button-ghost"
-        href="/ui/websites/{{ website.id }}/urls?status={{ filters.status.value if filters.status else '' }}&sitemap_id={{ filters.sitemap_id if filters.sitemap_id else '' }}&search={{ filters.search }}&page={{ listing.page - 1 }}&page_size={{ listing.page_size }}"
+        href="/ui/websites/{{ website.id }}/urls{{ url_query_params(filters.status, filters.sitemap_id, filters.search, listing.page - 1, listing.page_size) }}"
       >
         Previous
       </a>
@@ -116,7 +140,7 @@
       {% if listing.page < listing.total_pages %}
       <a
         class="panel-button panel-button-ghost"
-        href="/ui/websites/{{ website.id }}/urls?status={{ filters.status.value if filters.status else '' }}&sitemap_id={{ filters.sitemap_id if filters.sitemap_id else '' }}&search={{ filters.search }}&page={{ listing.page + 1 }}&page_size={{ listing.page_size }}"
+        href="/ui/websites/{{ website.id }}/urls{{ url_query_params(filters.status, filters.sitemap_id, filters.search, listing.page + 1, listing.page_size) }}"
       >
         Next
       </a>

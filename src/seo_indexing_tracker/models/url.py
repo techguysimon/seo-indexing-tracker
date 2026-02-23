@@ -108,6 +108,7 @@ class URL(Base):
         server_default=URLIndexStatus.UNCHECKED.value,
     )
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     discovered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

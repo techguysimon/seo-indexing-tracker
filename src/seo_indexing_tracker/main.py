@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import logging
 from pathlib import Path
 import signal
@@ -54,6 +54,32 @@ from seo_indexing_tracker.utils.logging import (
 __all__ = ["app", "create_app", "main"]
 
 _lifecycle_logger = logging.getLogger("seo_indexing_tracker.lifecycle")
+
+
+def _datetime_relative(value: datetime | None) -> str:
+    """Format a datetime as a human-readable relative time string."""
+    if value is None:
+        return "Never"
+
+    now = datetime.now(UTC)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+
+    delta = now - value
+
+    if delta < timedelta(seconds=60):
+        return "just now"
+    if delta < timedelta(hours=1):
+        minutes = int(delta.total_seconds() / 60)
+        return f"{minutes} min ago" if minutes == 1 else f"{minutes} mins ago"
+    if delta < timedelta(days=1):
+        hours = int(delta.total_seconds() / 3600)
+        return f"{hours} hour ago" if hours == 1 else f"{hours} hours ago"
+    if delta < timedelta(days=30):
+        days = int(delta.total_seconds() / 86400)
+        return f"{days} day ago" if days == 1 else f"{days} days ago"
+
+    return value.strftime("%Y-%m-%d %H:%M")
 
 
 def _initialize_lifecycle_state(app: FastAPI) -> None:
@@ -232,6 +258,7 @@ def create_app() -> FastAPI:
             lambda request: {"settings": request.app.state.settings},
         ],
     )
+    templates.env.filters["datetime_relative"] = _datetime_relative
 
     app = FastAPI(title="SEO Indexing Tracker", lifespan=lifespan)
     _initialize_lifecycle_state(app)

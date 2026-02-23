@@ -12,7 +12,7 @@ import logging
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import and_, func, insert, select
+from sqlalchemy import and_, func, insert, select, update as update_stmt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seo_indexing_tracker.models import (
@@ -23,6 +23,9 @@ from seo_indexing_tracker.models import (
     SubmissionStatus,
     URL,
     Website,
+)
+from seo_indexing_tracker.utils.index_status import (
+    derive_url_index_status_from_coverage_state,
 )
 from seo_indexing_tracker.services.google_indexing_client import (
     BatchSubmitResult,
@@ -253,23 +256,72 @@ class BatchProcessorService:
                 outcomes=[failure_outcomes[url_id] for url_id in ordered_url_ids],
             )
 
+        # VERIFY-FIRST WORKFLOW: Inspect ALL dequeued URLs before submission
+        # This saves quota by avoiding submission of already-indexed URLs
+        inspection_records: list[_InspectionRecord] = []
+        inspection_results_by_url: dict[UUID, IndexStatusResult] = {}
+        inspected_count = 0
+
+        for inspect_batch in self._chunk_urls(queued_urls, self._inspection_batch_size):
+            batch_inspection_results = await self._inspect_url_batch(
+                website_id=website_id,
+                site_url=website.site_url,
+                urls=inspect_batch,
+                client=clients.search_console,
+            )
+            inspection_results_by_url.update(batch_inspection_results)
+
+            for inspected_url in inspect_batch:
+                inspection_result = batch_inspection_results[inspected_url.id]
+                outcomes[inspected_url.id] = self._with_inspection_result(
+                    outcomes[inspected_url.id],
+                    inspection_result,
+                )
+                inspection_records.append(
+                    _InspectionRecord(url_id=inspected_url.id, result=inspection_result)
+                )
+
+            inspected_count += len(inspect_batch)
+            await self._emit_progress(
+                callback=progress_callback,
+                website_id=website_id,
+                stage="inspect",
+                message="Pre-submission URL inspection batch completed",
+                total_urls=len(queued_urls),
+                processed_urls=inspected_count,
+                successful_urls=self._inspection_success_count(list(outcomes.values())),
+                failed_urls=inspected_count
+                - self._inspection_success_count(list(outcomes.values())),
+            )
+
+        # Record all inspection results (updates URL.latest_index_status)
+        await self._record_index_statuses(records=inspection_records)
+
+        # Filter URLs for submission based on inspection results
+        # Skip URLs that are already indexed, unless user forced submission via manual_priority_override
         submitted_results: dict[UUID, IndexingURLResult] = {}
         submission_logs: list[_SubmissionLogRecord] = []
-        latest_statuses = await self._latest_index_statuses_by_url_ids(
-            url_ids=ordered_url_ids
-        )
         eligible_for_submission: list[URL] = []
         next_checkpoint_at = 100
 
         for queued_url in queued_urls:
-            latest_status = latest_statuses.get(queued_url.id)
-            if queued_url.manual_priority_override is None and self._is_already_indexed(
-                latest_status
-            ):
+            url_inspection_result: IndexStatusResult | None = (
+                inspection_results_by_url.get(queued_url.id)
+            )
+
+            # Check if URL is already indexed based on fresh inspection result
+            is_indexed = self._inspection_shows_indexed(url_inspection_result)
+
+            # User override: always submit if manual_priority_override is set
+            if queued_url.manual_priority_override is not None:
+                eligible_for_submission.append(queued_url)
+                continue
+
+            if is_indexed:
                 outcomes[queued_url.id] = self._with_submission_skipped(
                     outcomes[queued_url.id],
                     error_code="SKIPPED_ALREADY_INDEXED",
-                    error_message="Skipped submission because latest status is Indexed",
+                    error_message="Skipped submission because inspection shows URL is already indexed",
                 )
                 submission_logs.append(
                     _SubmissionLogRecord(
@@ -280,17 +332,29 @@ class BatchProcessorService:
                             "success": False,
                             "error_code": "SKIPPED_ALREADY_INDEXED",
                             "error_message": (
-                                "Skipped submission because latest status is Indexed"
+                                "Skipped submission because inspection shows URL is already indexed"
                             ),
                         },
                         status=SubmissionStatus.SKIPPED,
-                        error_message="Skipped submission because latest status is Indexed",
+                        error_message="Skipped submission because inspection shows URL is already indexed",
                     )
                 )
                 continue
 
+            # If inspection failed, fall back to submitting (conservative: better to submit than miss)
+            if url_inspection_result is not None and not url_inspection_result.success:
+                _batch_logger.warning(
+                    "inspection_failed_falling_back_to_submission",
+                    extra={
+                        "url_id": str(queued_url.id),
+                        "url": queued_url.url,
+                        "error_code": url_inspection_result.error_code,
+                    },
+                )
+
             eligible_for_submission.append(queued_url)
 
+        # Submit only the filtered URLs that need it
         for url_batch in self._chunk_urls(
             eligible_for_submission, self._submit_batch_size
         ):
@@ -341,50 +405,6 @@ class BatchProcessorService:
             )
 
         await self._record_submission_logs(action=action, logs=submission_logs)
-
-        successfully_submitted = [
-            queued_url
-            for queued_url in eligible_for_submission
-            if submitted_results.get(queued_url.id, None) is not None
-            and submitted_results[queued_url.id].success
-        ]
-
-        inspection_records: list[_InspectionRecord] = []
-        inspected_count = 0
-        for inspect_batch in self._chunk_urls(
-            successfully_submitted,
-            self._inspection_batch_size,
-        ):
-            inspection_results = await self._inspect_url_batch(
-                website_id=website_id,
-                site_url=website.site_url,
-                urls=inspect_batch,
-                client=clients.search_console,
-            )
-            for inspected_url in inspect_batch:
-                inspection_result = inspection_results[inspected_url.id]
-                outcomes[inspected_url.id] = self._with_inspection_result(
-                    outcomes[inspected_url.id],
-                    inspection_result,
-                )
-                inspection_records.append(
-                    _InspectionRecord(url_id=inspected_url.id, result=inspection_result)
-                )
-
-            inspected_count += len(inspect_batch)
-            await self._emit_progress(
-                callback=progress_callback,
-                website_id=website_id,
-                stage="inspect",
-                message="Processed URL inspection batch",
-                total_urls=len(successfully_submitted),
-                processed_urls=inspected_count,
-                successful_urls=self._inspection_success_count(list(outcomes.values())),
-                failed_urls=inspected_count
-                - self._inspection_success_count(list(outcomes.values())),
-            )
-
-        await self._record_index_statuses(records=inspection_records)
 
         failed_url_ids = [
             outcome.url_id
@@ -627,6 +647,17 @@ class BatchProcessorService:
         async with self._session_factory() as session:
             await session.execute(insert(SubmissionLog), rows)
 
+            # Update last_submitted_at for successful submissions
+            successful_url_ids = [
+                log.url_id for log in logs if log.status == SubmissionStatus.SUCCESS
+            ]
+            if successful_url_ids:
+                await session.execute(
+                    update_stmt(URL)
+                    .where(URL.id.in_(successful_url_ids))
+                    .values(last_submitted_at=datetime.now(UTC))
+                )
+
     async def _record_index_statuses(
         self, *, records: Sequence[_InspectionRecord]
     ) -> None:
@@ -640,6 +671,21 @@ class BatchProcessorService:
         ]
         async with self._session_factory() as session:
             await session.execute(insert(IndexStatus), rows)
+
+            url_ids = [record.url_id for record in records]
+            urls = await session.scalars(select(URL).where(URL.id.in_(url_ids)))
+            url_by_id = {url.id: url for url in urls}
+
+            for record in records:
+                url = url_by_id.get(record.url_id)
+                if url is None:
+                    continue
+                coverage_state = record.result.coverage_state or "INSPECTION_FAILED"
+                derived_status = derive_url_index_status_from_coverage_state(
+                    coverage_state
+                )
+                url.latest_index_status = derived_status
+                url.last_checked_at = checked_at
 
     def _index_status_row(
         self,
@@ -837,10 +883,10 @@ class BatchProcessorService:
             submission_skipped=True,
             submission_error_code=error_code,
             submission_error_message=error_message,
-            inspection_attempted=False,
-            inspection_success=False,
-            inspection_error_code=None,
-            inspection_error_message=None,
+            inspection_attempted=outcome.inspection_attempted,
+            inspection_success=outcome.inspection_success,
+            inspection_error_code=outcome.inspection_error_code,
+            inspection_error_message=outcome.inspection_error_message,
         )
 
     @staticmethod
@@ -972,6 +1018,21 @@ class BatchProcessorService:
             return False
 
         return index_status.coverage_state.strip().casefold() == "indexed"
+
+    @staticmethod
+    def _inspection_shows_indexed(result: IndexStatusResult | None) -> bool:
+        """Check if inspection result indicates URL is already indexed."""
+        if result is None:
+            return False
+        coverage_state = result.coverage_state
+        if not coverage_state:
+            return False
+
+        # Use the same logic as derive_url_index_status_from_coverage_state
+        from seo_indexing_tracker.models.url import URLIndexStatus
+
+        derived = derive_url_index_status_from_coverage_state(coverage_state)
+        return derived == URLIndexStatus.INDEXED
 
     async def _emit_progress(
         self,

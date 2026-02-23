@@ -38,9 +38,17 @@ from seo_indexing_tracker.services.google_url_inspection_client import (
 )
 from seo_indexing_tracker.services.priority_queue import PriorityQueueService
 from seo_indexing_tracker.services.quota_service import QuotaService
-from seo_indexing_tracker.services.rate_limiter import RateLimiterService
+from seo_indexing_tracker.services.rate_limiter import (
+    ConcurrentRequestLimitExceededError,
+    RateLimitTimeoutError,
+    RateLimitTokenUnavailableError,
+    RateLimiterService,
+)
 from seo_indexing_tracker.services.scheduler import SchedulerService
 from seo_indexing_tracker.services.url_discovery import URLDiscoveryService
+from seo_indexing_tracker.utils.index_status import (
+    derive_url_index_status_from_coverage_state,
+)
 
 _job_logger = logging.getLogger("seo_indexing_tracker.scheduler.jobs")
 
@@ -320,7 +328,8 @@ class _OverlapProtectedRunner:
             parameter_count = None
 
         if parameter_count == 0:
-            legacy_result = await cast(Any, run)()
+            async with asyncio.timeout(900):  # 15 minute timeout
+                legacy_result = await cast(Any, run)()
             if isinstance(legacy_result, JobRunResult):
                 return legacy_result
             if isinstance(legacy_result, dict):
@@ -336,7 +345,8 @@ class _OverlapProtectedRunner:
                 )
             raise RuntimeError("Legacy scheduler job returned unexpected payload")
 
-        return await run(execution_id)
+        async with asyncio.timeout(900):  # 15 minute timeout
+            return await run(execution_id)
 
 
 class SchedulerProcessingPipelineService:
@@ -420,6 +430,15 @@ class SchedulerProcessingPipelineService:
         website_credentials = await self._list_websites_with_credentials(
             requires_queued_urls=True
         )
+        _job_logger.debug(
+            "submit_urls_websites_found",
+            extra={
+                "website_count": len(website_credentials),
+                "website_ids": [str(w.website_id) for w in website_credentials],
+            },
+        )
+        if not website_credentials:
+            _job_logger.debug("submit_urls_no_websites_with_queued_urls")
         processed_websites = 0
         dequeued_urls = 0
         failed_urls = 0
@@ -455,6 +474,13 @@ class SchedulerProcessingPipelineService:
             )
 
         for website in website_credentials:
+            _job_logger.debug(
+                "submit_urls_processing_website",
+                extra={
+                    "website_id": str(website.website_id),
+                    "batch_size": self._settings.SCHEDULER_URL_SUBMISSION_BATCH_SIZE,
+                },
+            )
             self._client_factory.register_website(
                 website_id=website.website_id,
                 credentials_path=website.credentials_path,
@@ -470,6 +496,15 @@ class SchedulerProcessingPipelineService:
                 website.website_id,
                 requested_urls=self._settings.SCHEDULER_URL_SUBMISSION_BATCH_SIZE,
                 progress_callback=progress_callback,
+            )
+            _job_logger.debug(
+                "submit_urls_batch_complete",
+                extra={
+                    "website_id": str(website.website_id),
+                    "dequeued_urls": result.dequeued_urls,
+                    "submission_success_count": result.submission_success_count,
+                    "submission_failure_count": result.submission_failure_count,
+                },
             )
             processed_websites += 1
             dequeued_urls += result.dequeued_urls
@@ -519,15 +554,35 @@ class SchedulerProcessingPipelineService:
         website_credentials = await self._list_websites_with_credentials(
             requires_queued_urls=False
         )
+        _job_logger.debug(
+            "verify_index_websites_found",
+            extra={
+                "website_count": len(website_credentials),
+                "website_ids": [str(w.website_id) for w in website_credentials],
+            },
+        )
+        if not website_credentials:
+            _job_logger.debug("verify_index_no_websites_with_credentials")
         inspected_urls = 0
         failed_urls = 0
 
         for website in website_credentials:
+            _job_logger.debug(
+                "verify_index_processing_website",
+                extra={"website_id": str(website.website_id)},
+            )
             self._client_factory.register_website(
                 website_id=website.website_id,
                 credentials_path=website.credentials_path,
             )
             candidate_urls = await self._pick_urls_for_verification(website.website_id)
+            _job_logger.debug(
+                "verify_index_candidates_found",
+                extra={
+                    "website_id": str(website.website_id),
+                    "candidate_count": len(candidate_urls),
+                },
+            )
             if not candidate_urls:
                 continue
 
@@ -535,6 +590,7 @@ class SchedulerProcessingPipelineService:
                 website.website_id
             ).search_console
             inspection_rows: list[dict[str, object]] = []
+            results_by_url_id: dict[UUID, IndexStatusResult] = {}
             for candidate in candidate_urls:
                 result = await self._inspect_single_url(
                     website_id=website.website_id,
@@ -544,12 +600,29 @@ class SchedulerProcessingPipelineService:
                 inspection_rows.append(
                     self._index_status_row(url_id=candidate.url_id, result=result)
                 )
+                results_by_url_id[candidate.url_id] = result
                 inspected_urls += 1
                 if not result.success:
                     failed_urls += 1
 
             async with session_scope() as session:
                 await session.execute(insert(IndexStatus), inspection_rows)
+
+                url_ids = list(results_by_url_id.keys())
+                urls = await session.scalars(select(URL).where(URL.id.in_(url_ids)))
+                url_by_id = {url.id: url for url in urls}
+
+                checked_at = datetime.now(UTC)
+                for url_id, result in results_by_url_id.items():
+                    url = url_by_id.get(url_id)
+                    if url is None:
+                        continue
+                    coverage_state = result.coverage_state or "INSPECTION_FAILED"
+                    derived_status = derive_url_index_status_from_coverage_state(
+                        coverage_state
+                    )
+                    url.latest_index_status = derived_status
+                    url.last_checked_at = checked_at
 
         summary = {
             "processed_websites": len(website_credentials),
@@ -680,6 +753,14 @@ class SchedulerProcessingPipelineService:
         try:
             permit = await self._rate_limiter.acquire(website_id, api_type="inspection")
         except Exception as error:
+            is_rate_limit_error = isinstance(
+                error,
+                (
+                    RateLimitTokenUnavailableError,
+                    RateLimitTimeoutError,
+                    ConcurrentRequestLimitExceededError,
+                ),
+            )
             return IndexStatusResult(
                 inspection_url=candidate.url,
                 site_url=candidate.site_url,
@@ -692,7 +773,9 @@ class SchedulerProcessingPipelineService:
                 indexing_state=None,
                 robots_txt_state=None,
                 raw_response=None,
-                error_code="RATE_LIMITED",
+                error_code="RATE_LIMITED"
+                if is_rate_limit_error
+                else "RATE_LIMITER_ERROR",
                 error_message=str(error),
                 retry_after_seconds=None,
             )

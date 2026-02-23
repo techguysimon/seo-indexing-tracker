@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from seo_indexing_tracker.schemas.service_account import ServiceAccountRead
 
@@ -14,7 +14,9 @@ class WebsiteBase(BaseModel):
     """Shared website fields."""
 
     domain: str = Field(min_length=1, max_length=255)
-    site_url: AnyHttpUrl
+    site_url: str = Field(
+        description="Site URL for Google API - either https://domain.com for URL-prefix properties or sc-domain:domain.com for Domain properties"
+    )
     is_active: bool = True
     rate_limit_bucket_size: int = Field(default=10, ge=1)
     rate_limit_refill_rate: float = Field(default=1.0, gt=0)
@@ -30,7 +32,10 @@ class WebsiteUpdate(BaseModel):
     """Payload used to update mutable website fields."""
 
     domain: str | None = Field(default=None, min_length=1, max_length=255)
-    site_url: AnyHttpUrl | None = None
+    site_url: str | None = Field(
+        default=None,
+        description="Site URL for Google API - either https://domain.com for URL-prefix properties or sc-domain:domain.com for Domain properties",
+    )
     is_active: bool | None = None
     rate_limit_bucket_size: int | None = Field(default=None, ge=1)
     rate_limit_refill_rate: float | None = Field(default=None, gt=0)

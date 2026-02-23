@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from enum import Enum
 import logging
 from pathlib import Path
+import threading
 from typing import Any, Protocol, cast
 from urllib.parse import urlparse
 from uuid import UUID
@@ -165,7 +166,11 @@ def _system_status_from_coverage(coverage_state: str | None) -> InspectionSystem
 
 
 class GoogleURLInspectionClient:
-    """Search Console URL Inspection API client with asyncio wrappers."""
+    """Search Console URL Inspection API client with asyncio wrappers.
+
+    Uses thread-local storage for the Google API service to avoid memory
+    corruption when httplib2 is used from multiple threads via asyncio.to_thread.
+    """
 
     def __init__(
         self,
@@ -182,7 +187,9 @@ class GoogleURLInspectionClient:
         self._credentials_path = str(Path(credentials_path).expanduser().resolve())
         self._scopes = deduplicated_scopes
         self._builder = builder
-        self._service: Any | None = None
+        # Thread-local storage ensures each thread gets its own service instance
+        # This prevents memory corruption when httplib2 is used from thread pool
+        self._thread_local = threading.local()
 
     def _build_service(self) -> Any:
         credentials = load_service_account_credentials(
@@ -198,9 +205,12 @@ class GoogleURLInspectionClient:
 
     @property
     def _search_console_service(self) -> Any:
-        if self._service is None:
-            self._service = self._build_service()
-        return self._service
+        """Get thread-local service instance, building lazily per thread."""
+        service = getattr(self._thread_local, "service", None)
+        if service is None:
+            service = self._build_service()
+            self._thread_local.service = service
+        return service
 
     def _error_result(
         self,
