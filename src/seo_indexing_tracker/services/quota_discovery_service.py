@@ -192,19 +192,32 @@ class QuotaDiscoveryService:
         inspection_limit = (
             website.discovered_inspection_quota or self.DEFAULT_INSPECTION_QUOTA
         )
+        indexing_pct = (
+            (indexing_used / int(indexing_limit) * 100)
+            if int(indexing_limit) > 0
+            else 0.0
+        )
+        inspection_pct = (
+            (inspection_used / int(inspection_limit) * 100)
+            if int(inspection_limit) > 0
+            else 0.0
+        )
         return {
             "indexing": {
                 "used": indexing_used,
                 "limit": int(indexing_limit),
                 "remaining": max(int(indexing_limit) - indexing_used, 0),
+                "percentage_used": indexing_pct,
             },
             "inspection": {
                 "used": inspection_used,
                 "limit": int(inspection_limit),
                 "remaining": max(int(inspection_limit) - inspection_used, 0),
+                "percentage_used": inspection_pct,
             },
             "status": website.quota_discovery_status.value,
             "confidence": float(website.quota_discovery_confidence),
+            "confidence_percentage": int(website.quota_discovery_confidence * 100),
             "discovered_at": website.quota_discovered_at.isoformat()
             if website.quota_discovered_at is not None
             else None,

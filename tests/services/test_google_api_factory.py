@@ -10,6 +10,7 @@ import pytest
 
 from seo_indexing_tracker.services.google_api_factory import (
     GoogleAPIClientFactory,
+    WebsiteGoogleAPIClients,
     WebsiteServiceAccountConfig,
 )
 
@@ -191,3 +192,130 @@ def test_get_client_is_thread_safe_and_loads_configuration_once() -> None:
     assert loader_call_count == 1
     first_result = results[0]
     assert all(result is first_result for result in results)
+
+
+def test_clear_cache_without_arg_clears_all_websites(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credential_cache_clear_count = 0
+
+    def fake_clear_google_credentials_cache() -> None:
+        nonlocal credential_cache_clear_count
+        credential_cache_clear_count += 1
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.google_api_factory.clear_google_credentials_cache",
+        fake_clear_google_credentials_cache,
+    )
+
+    def config_loader(_: UUID | str) -> WebsiteServiceAccountConfig:
+        return WebsiteServiceAccountConfig(credentials_path="/tmp/site.json")
+
+    factory = GoogleAPIClientFactory(config_loader=config_loader)
+    factory.get_client("site-a")
+    factory.get_client("site-b")
+    factory.get_client("site-c")
+
+    assert len(factory._clients) == 3
+
+    factory.clear_cache(None)
+
+    assert len(factory._clients) == 0
+    assert credential_cache_clear_count == 1
+
+
+def test_different_websites_get_separate_client_bundles() -> None:
+    def config_loader(website_key: UUID | str) -> WebsiteServiceAccountConfig:
+        return WebsiteServiceAccountConfig(credentials_path=f"/tmp/{website_key}.json")
+
+    factory = GoogleAPIClientFactory(config_loader=config_loader)
+
+    client_a = factory.get_client("site-a")
+    client_b = factory.get_client("site-b")
+
+    assert client_a is not client_b
+    assert client_a._credentials_path != client_b._credentials_path
+
+
+def test_uuid_and_string_form_of_same_id_share_cache() -> None:
+    website_uuid = uuid4()
+    loader_calls: list[str] = []
+
+    def config_loader(website_key: UUID | str) -> WebsiteServiceAccountConfig:
+        loader_calls.append(str(website_key))
+        return WebsiteServiceAccountConfig(credentials_path="/tmp/site.json")
+
+    factory = GoogleAPIClientFactory(config_loader=config_loader)
+
+    client_from_uuid = factory.get_client(website_uuid)
+    client_from_str = factory.get_client(str(website_uuid))
+
+    assert client_from_uuid is client_from_str
+    assert len(loader_calls) == 1
+
+
+def test_website_service_account_config_path_expansion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expanded_paths: list[str] = []
+
+    class FakeIndexingClient:
+        def __init__(self, *, credentials_path: str) -> None:
+            expanded_paths.append(credentials_path)
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.google_api_factory.GoogleIndexingClient",
+        FakeIndexingClient,
+    )
+
+    def config_loader(_: UUID | str) -> WebsiteServiceAccountConfig:
+        return WebsiteServiceAccountConfig(credentials_path="~/site.json")
+
+    factory = GoogleAPIClientFactory(config_loader=config_loader)
+    clients = factory.get_client("test-site")
+    _ = clients.indexing
+
+    assert len(expanded_paths) == 1
+    assert expanded_paths[0].startswith("/")
+
+
+def test_website_google_api_clients_double_checked_locking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_count = 0
+    init_lock = threading.Lock()
+
+    class FakeIndexingClient:
+        def __init__(self, *, credentials_path: str) -> None:
+            del credentials_path
+            nonlocal init_count
+            with init_lock:
+                init_count += 1
+
+    monkeypatch.setattr(
+        "seo_indexing_tracker.services.google_api_factory.GoogleIndexingClient",
+        FakeIndexingClient,
+    )
+
+    config = WebsiteServiceAccountConfig(credentials_path="/tmp/site.json")
+    clients = WebsiteGoogleAPIClients(config=config)
+
+    thread_count = 8
+    start_barrier = threading.Barrier(thread_count)
+    results: list[object] = []
+    results_lock = threading.Lock()
+
+    def worker() -> None:
+        start_barrier.wait()
+        client = clients.indexing
+        with results_lock:
+            results.append(client)
+
+    threads = [threading.Thread(target=worker) for _ in range(thread_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert init_count == 1
+    assert all(result is results[0] for result in results)

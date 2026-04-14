@@ -9,11 +9,11 @@
       <span>Quota status: <strong>{{ quota_status.status }}</strong></span>
       <span>Indexing quota: {{ quota_status.indexing.used }} / {{ quota_status.indexing.limit }} (confidence: {{ "%.0f" | format(quota_status.confidence * 100) }}%)</span>
       <div class="bar-track quota-track" role="img" aria-label="Indexing quota usage progress">
-        <div class="bar-fill quota-indexing" style="--bar: {{ "%.2f" | format((quota_status.indexing.used / quota_status.indexing.limit * 100) if quota_status.indexing.limit > 0 else 0) }}%;"></div>
+        <div class="bar-fill quota-indexing" style="--bar: {{ "%.2f" | format(quota_status.indexing.percentage_used) }}%;"></div>
       </div>
-      <span>Inspection quota: {{ quota_status.inspection.used }} / {{ quota_status.inspection.limit }} (confidence: {{ "%.0f" | format(quota_status.confidence * 100) }}%)</span>
+      <span>Inspection quota: {{ quota_status.inspection.used }} / {{ quota_status.inspection.limit }} (confidence: {{ quota_status.confidence_percentage }}%)</span>
       <div class="bar-track quota-track" role="img" aria-label="Inspection quota usage progress">
-        <div class="bar-fill quota-inspection" style="--bar: {{ "%.2f" | format((quota_status.inspection.used / quota_status.inspection.limit * 100) if quota_status.inspection.limit > 0 else 0) }}%;"></div>
+        <div class="bar-fill quota-inspection" style="--bar: {{ "%.2f" | format(quota_status.inspection.percentage_used) }}%;"></div>
       </div>
       <form
         class="inline-form"
