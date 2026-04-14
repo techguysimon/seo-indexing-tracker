@@ -43,7 +43,7 @@ def require_admin(request: Request) -> UserInfo:
 async def login(request: Request) -> HTMLResponse:
     """Render login page with Google OAuth URL."""
     templates: Jinja2Templates = request.app.state.templates
-    google_url = _auth_service.get_google_authorization_url(request)
+    google_url = await _auth_service.get_google_authorization_url(request)
     return templates.TemplateResponse(
         request=request,
         name="pages/login.html",

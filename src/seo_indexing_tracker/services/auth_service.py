@@ -15,6 +15,10 @@ from seo_indexing_tracker.schemas.auth import OAuthCallbackResult
 
 logger = logging.getLogger("seo_indexing_tracker.auth")
 
+_GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
+_GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+_GOOGLE_USERINFO_ENDPOINT = "https://www.googleapis.com/oauth2/v3/userinfo"
+
 
 class AuthService:
     """Handles Google OAuth, JWT tokens, and email role resolution."""
@@ -31,6 +35,13 @@ class AuthService:
         self._jwt_expiry_hours = settings.JWT_EXPIRY_HOURS
         self._oauth_client: OAuth | None = None
         self._oauth_initialized: bool = False
+
+        if self._google_client_id and self._google_client_secret:
+            logger.info("Google OAuth configured (client_id set)")
+        else:
+            logger.warning(
+                "Google OAuth NOT configured (client_id or client_secret missing)"
+            )
 
     @staticmethod
     def _get_or_create_jwt_secret(secret: SecretStr) -> str:
@@ -56,17 +67,21 @@ class AuthService:
                 name="google",
                 client_id=self._google_client_id,
                 client_secret=self._google_client_secret,
-                server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-                client_kwargs={"scope": "openid email profile"},
+                server_metadata_url=None,
+                client_kwargs={
+                    "scope": "openid email profile",
+                    "endpoint": _GOOGLE_AUTH_ENDPOINT,
+                },
+                token_endpoint=_GOOGLE_TOKEN_ENDPOINT,
             )
             self._oauth_initialized = True
         return self._oauth_client
 
-    def get_google_authorization_url(self, request) -> str:
+    async def get_google_authorization_url(self, request) -> str:
         oauth = self._get_oauth_client()
         redirect_uri = str(request.url_for("auth_callback"))
         try:
-            result = oauth.google.create_authorization_url(redirect_uri)
+            result = await oauth.google.create_authorization_url(redirect_uri)
             if isinstance(result, tuple):
                 return result[0]
             return result.get("url", "")
@@ -78,8 +93,8 @@ class AuthService:
         oauth = self._get_oauth_client()
         redirect_uri = str(request.url_for("auth_callback"))
         token = await oauth.google.fetch_token(redirect_uri, code=code)
-        user_info = await oauth.google.get("userinfo", token=token)
-        return user_info.json()
+        resp = await oauth.google.get(_GOOGLE_USERINFO_ENDPOINT, token=token)
+        return resp.json()
 
     def create_jwt(self, email: str, role: str) -> str:
         """Create JWT with email + role, signed with JWT_SECRET."""
