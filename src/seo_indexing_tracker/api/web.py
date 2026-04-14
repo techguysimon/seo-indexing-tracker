@@ -58,9 +58,10 @@ from seo_indexing_tracker.services.config_validation import (
     ConfigurationValidationError,
     ConfigurationValidationService,
 )
-from seo_indexing_tracker.services.priority_queue import PriorityQueueService
+
 from seo_indexing_tracker.services.quota_discovery_service import QuotaDiscoveryService
 from seo_indexing_tracker.services.queue_eta_service import QueueETAService
+from seo_indexing_tracker.services.priority_queue import PriorityQueueService
 from seo_indexing_tracker.services.sitemap_fetcher import (
     SitemapFetchError,
     SitemapFetchNetworkError,
@@ -70,6 +71,12 @@ from seo_indexing_tracker.services.sitemap_fetcher import (
 from seo_indexing_tracker.services.url_discovery import (
     URLDiscoveryProcessingError,
     URLDiscoveryService,
+)
+from seo_indexing_tracker.services.trigger_indexing_service import (
+    EnqueueException,
+    SitemapFetchException,
+    TriggerIndexingService,
+    URLDiscoveryProcessingException,
 )
 from seo_indexing_tracker.services.processing_pipeline import (
     INDEX_VERIFICATION_JOB_ID,
@@ -1275,87 +1282,82 @@ async def trigger_indexing(
     queue_service = PriorityQueueService(
         session_factory=lambda: _use_existing_session(session)
     )
-    sitemap_rows = (
-        await session.execute(
-            select(Sitemap.id, Sitemap.url).where(
-                Sitemap.website_id == website_id,
-                Sitemap.is_active.is_(True),
-            )
-        )
-    ).all()
-    sitemap_ids = [row.id for row in sitemap_rows]
-    sitemap_urls_by_id = {row.id: row.url for row in sitemap_rows}
-
-    discovered_urls = 0
-    for sitemap_id in sitemap_ids:
-        sitemap_url = sitemap_urls_by_id.get(sitemap_id)
-        safe_sitemap_url = _safe_sitemap_url_for_feedback(sitemap_url)
-        try:
-            discovery_result = await discovery_service.discover_urls(sitemap_id)
-            discovered_urls += (
-                discovery_result.new_count + discovery_result.modified_count
-            )
-        except SitemapFetchError as error:
-            error_url = getattr(error, "url", None)
-            safe_error_url = (
-                _safe_sitemap_url_for_feedback(error_url) if error_url else None
-            )
-            _trigger_logger.error(
-                {
-                    "event": "trigger_indexing_failed",
-                    "website_id": str(website_id),
-                    "sitemap_id": str(sitemap_id),
-                    "sitemap_url_sanitized": safe_error_url or safe_sitemap_url,
-                    "stage": "fetch",
-                    "exception_class": error.__class__.__name__,
-                    "http_status": getattr(error, "status_code", None),
-                    "content_type": getattr(error, "content_type", None),
-                }
-            )
-            feedback = _trigger_feedback_for_fetch_error(
-                error=error,
-                safe_sitemap_url=safe_error_url or safe_sitemap_url,
-            )
-            return await _rollback_and_render_website_detail(
-                request=request,
-                session=session,
-                website_id=website_id,
-                feedback=feedback,
-            )
-        except URLDiscoveryProcessingError as error:
-            safe_error_url = _safe_sitemap_url_for_feedback(error.sitemap_url)
-            _trigger_logger.error(
-                {
-                    "event": "trigger_indexing_failed",
-                    "website_id": str(website_id),
-                    "sitemap_id": str(sitemap_id),
-                    "sitemap_url_sanitized": safe_error_url,
-                    "stage": error.stage,
-                    "exception_class": error.__class__.__name__,
-                    "http_status": error.status_code,
-                    "content_type": error.content_type,
-                }
-            )
-            feedback = _trigger_feedback_for_discovery_error(
-                error=error,
-                safe_sitemap_url=safe_error_url,
-            )
-            return await _rollback_and_render_website_detail(
-                request=request,
-                session=session,
-                website_id=website_id,
-                feedback=feedback,
-            )
-
-    website_url_ids = list(
-        await session.scalars(select(URL.id).where(URL.website_id == website_id))
+    service = TriggerIndexingService(
+        session,
+        discovery_service=discovery_service,
+        queue_service=queue_service,
     )
-    enqueue_context_sitemap_url = _safe_sitemap_url_for_feedback(
-        next(iter(sitemap_urls_by_id.values()), None)
-    )
+
     try:
-        queued_urls = await queue_service.enqueue_many(website_url_ids)
-    except Exception as error:
+        result = await service.trigger_indexing(website_id)
+        return await _render_website_detail(
+            request=request,
+            session=session,
+            website_id=website_id,
+            feedback=result.feedback,
+        )
+    except SitemapFetchException as error:
+        _trigger_logger.error(
+            {
+                "event": "trigger_indexing_failed",
+                "website_id": str(website_id),
+                "sitemap_id": None,
+                "sitemap_url_sanitized": _safe_sitemap_url_for_feedback(error.url),
+                "stage": "fetch",
+                "exception_class": error.__class__.__name__,
+                "http_status": error.status_code,
+                "content_type": error.content_type,
+            }
+        )
+        feedback = _trigger_feedback_for_fetch_error(
+            error=error.original_error,  # type: ignore[arg-type]
+            safe_sitemap_url=_safe_sitemap_url_for_feedback(error.url),
+        )
+        return await _rollback_and_render_website_detail(
+            request=request,
+            session=session,
+            website_id=website_id,
+            feedback=feedback,
+        )
+    except URLDiscoveryProcessingException as error:
+        _trigger_logger.error(
+            {
+                "event": "trigger_indexing_failed",
+                "website_id": str(website_id),
+                "sitemap_id": str(error.sitemap_id),
+                "sitemap_url_sanitized": _safe_sitemap_url_for_feedback(
+                    error.sitemap_url
+                ),
+                "stage": error.stage,
+                "exception_class": error.__class__.__name__,
+                "http_status": error.status_code,
+                "content_type": error.content_type,
+            }
+        )
+        feedback = _trigger_feedback_for_discovery_error(
+            error=error,
+            safe_sitemap_url=_safe_sitemap_url_for_feedback(error.sitemap_url),
+        )
+        return await _rollback_and_render_website_detail(
+            request=request,
+            session=session,
+            website_id=website_id,
+            feedback=feedback,
+        )
+    except EnqueueException as error:
+        sitemap_url_row = (
+            await session.execute(
+                select(Sitemap.url)
+                .where(
+                    Sitemap.website_id == website_id,
+                    Sitemap.is_active.is_(True),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        enqueue_context_sitemap_url = (
+            _safe_sitemap_url_for_feedback(sitemap_url_row) if sitemap_url_row else None
+        )
         _trigger_logger.error(
             {
                 "event": "trigger_indexing_failed",
@@ -1377,18 +1379,6 @@ async def trigger_indexing(
                 "Review server logs for enqueue diagnostics and retry."
             ),
         )
-    feedback = (
-        "Indexing triggered: "
-        f"refreshed {len(sitemap_ids)} sitemaps, "
-        f"discovered {discovered_urls} URLs, "
-        f"queued {queued_urls} URLs"
-    )
-    return await _render_website_detail(
-        request=request,
-        session=session,
-        website_id=website_id,
-        feedback=feedback,
-    )
 
 
 @router.post("/websites/{website_id}/quota/discover", response_class=Response)
