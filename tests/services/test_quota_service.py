@@ -11,7 +11,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from seo_indexing_tracker.models import Base, QuotaUsage, Website
+from seo_indexing_tracker.models import Base, QuotaDiscoveryStatus, QuotaUsage, Website
+from seo_indexing_tracker.services.quota_service import QuotaAPIType
 from seo_indexing_tracker.services.quota_service import (
     DailyQuotaExceededError,
     QuotaService,
@@ -217,3 +218,109 @@ async def test_quota_service_resets_when_date_changes(tmp_path: Path) -> None:
     assert usage_dates == [date(2026, 2, 20), date(2026, 2, 21)]
 
     await engine.dispose()
+
+
+def test_quota_service_uses_configured_baseline_for_non_manual_discovery() -> None:
+    website = Website(
+        domain="example-baseline.com",
+        site_url="https://example-baseline.com",
+        discovered_indexing_quota=9_999,
+        discovered_inspection_quota=8_888,
+        quota_discovery_status=QuotaDiscoveryStatus.ESTIMATED,
+        quota_discovery_confidence=0.99,
+    )
+
+    settings = QuotaServiceSettings(
+        INDEXING_DAILY_QUOTA_LIMIT=200,
+        INSPECTION_DAILY_QUOTA_LIMIT=2000,
+    )
+
+    assert (
+        QuotaService._quota_limit(
+            api_type=QuotaAPIType.INDEXING,
+            website=website,
+            settings=settings,
+        )
+        == 200
+    )
+    assert (
+        QuotaService._quota_limit(
+            api_type=QuotaAPIType.INSPECTION,
+            website=website,
+            settings=settings,
+        )
+        == 2000
+    )
+
+
+def test_quota_service_defaults_match_stable_runtime_limits() -> None:
+    settings = QuotaServiceSettings()
+
+    assert settings.INDEXING_DAILY_QUOTA_LIMIT == 200
+    assert settings.INSPECTION_DAILY_QUOTA_LIMIT == 2000
+
+
+def test_quota_service_discovering_values_cannot_auto_escalate_runtime_limit() -> None:
+    website = Website(
+        domain="example-discovering.com",
+        site_url="https://example-discovering.com",
+        discovered_indexing_quota=20_000,
+        discovered_inspection_quota=40_000,
+        quota_discovery_status=QuotaDiscoveryStatus.DISCOVERING,
+        quota_discovery_confidence=0.5,
+    )
+
+    settings = QuotaServiceSettings(
+        INDEXING_DAILY_QUOTA_LIMIT=200,
+        INSPECTION_DAILY_QUOTA_LIMIT=2000,
+    )
+
+    assert (
+        QuotaService._quota_limit(
+            api_type=QuotaAPIType.INDEXING,
+            website=website,
+            settings=settings,
+        )
+        == 200
+    )
+    assert (
+        QuotaService._quota_limit(
+            api_type=QuotaAPIType.INSPECTION,
+            website=website,
+            settings=settings,
+        )
+        == 2000
+    )
+
+
+def test_quota_service_allows_confirmed_manual_override_limits() -> None:
+    website = Website(
+        domain="example-manual.com",
+        site_url="https://example-manual.com",
+        discovered_indexing_quota=350,
+        discovered_inspection_quota=3_500,
+        quota_discovery_status=QuotaDiscoveryStatus.CONFIRMED,
+        quota_discovery_confidence=0.25,
+    )
+
+    settings = QuotaServiceSettings(
+        INDEXING_DAILY_QUOTA_LIMIT=200,
+        INSPECTION_DAILY_QUOTA_LIMIT=2000,
+    )
+
+    assert (
+        QuotaService._quota_limit(
+            api_type=QuotaAPIType.INDEXING,
+            website=website,
+            settings=settings,
+        )
+        == 350
+    )
+    assert (
+        QuotaService._quota_limit(
+            api_type=QuotaAPIType.INSPECTION,
+            website=website,
+            settings=settings,
+        )
+        == 3500
+    )

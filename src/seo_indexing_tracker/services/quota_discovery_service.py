@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
-from math import ceil
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from seo_indexing_tracker.config import Settings, get_settings
 from seo_indexing_tracker.models import QuotaDiscoveryStatus, QuotaUsage, Website
 from seo_indexing_tracker.services.activity_service import ActivityService
 
@@ -16,15 +16,22 @@ from seo_indexing_tracker.services.activity_service import ActivityService
 class QuotaDiscoveryService:
     """Discover and refine practical quota limits for each website."""
 
-    DEFAULT_INDEXING_QUOTA = 50
-    DEFAULT_INSPECTION_QUOTA = 500
     CONFIDENCE_THRESHOLD_CONFIRMED = 0.95
     SUCCESS_WINDOW_FOR_ESTIMATED = 10
     SUCCESS_WINDOW_FOR_CONFIRMED = 50
     REDISCOVERY_INTERVAL = timedelta(days=7)
 
-    def __init__(self) -> None:
+    def __init__(self, *, settings: Settings | None = None) -> None:
+        self._settings = settings or get_settings()
         self._activity_service = ActivityService()
+
+    @property
+    def DEFAULT_INDEXING_QUOTA(self) -> int:  # noqa: N802
+        return int(self._settings.INDEXING_DAILY_QUOTA_LIMIT)
+
+    @property
+    def DEFAULT_INSPECTION_QUOTA(self) -> int:  # noqa: N802
+        return int(self._settings.INSPECTION_DAILY_QUOTA_LIMIT)
 
     async def discover_quota(self, session: AsyncSession, website_id: UUID) -> None:
         """Initialize or re-start quota discovery for a website."""
@@ -74,27 +81,29 @@ class QuotaDiscoveryService:
         normalized_api = self._normalize_api_type(api_type)
         now = datetime.now(UTC)
 
-        current_quota = self._quota_value_for_api(
-            website=website, api_type=normalized_api
-        )
-        floor = self._default_quota_for_api(normalized_api)
-        reduced_quota = max(floor, int(current_quota * 0.9))
-        self._set_quota_value_for_api(
-            website=website,
-            api_type=normalized_api,
-            quota=max(reduced_quota, 1),
-        )
+        if website.quota_discovery_status is not QuotaDiscoveryStatus.CONFIRMED:
+            current_quota = self._quota_value_for_api(
+                website=website, api_type=normalized_api
+            )
+            floor = self._default_quota_for_api(normalized_api)
+            reduced_quota = max(floor, int(current_quota * 0.9))
+            self._set_quota_value_for_api(
+                website=website,
+                api_type=normalized_api,
+                quota=max(reduced_quota, 1),
+            )
 
         confidence_penalty = 0.15 if retry_after_seconds is not None else 0.25
         website.quota_discovery_confidence = max(
             0.05,
             float(website.quota_discovery_confidence) - confidence_penalty,
         )
-        website.quota_discovery_status = (
-            QuotaDiscoveryStatus.FAILED
-            if website.quota_discovery_confidence < 0.15
-            else QuotaDiscoveryStatus.ESTIMATED
-        )
+        if website.quota_discovery_status is not QuotaDiscoveryStatus.CONFIRMED:
+            website.quota_discovery_status = (
+                QuotaDiscoveryStatus.FAILED
+                if website.quota_discovery_confidence < 0.15
+                else QuotaDiscoveryStatus.ESTIMATED
+            )
         website.quota_last_429_at = now
         website.quota_discovered_at = now
         await session.flush()
@@ -113,6 +122,11 @@ class QuotaDiscoveryService:
         normalized_api = self._normalize_api_type(api_type)
         now = datetime.now(UTC)
 
+        if website.quota_discovery_status is QuotaDiscoveryStatus.CONFIRMED:
+            website.quota_discovered_at = now
+            await session.flush()
+            return
+
         if self._should_restart_discovery(website=website, now=now):
             await self.discover_quota(session=session, website_id=website_id)
             return
@@ -129,11 +143,14 @@ class QuotaDiscoveryService:
                 website=website,
                 api_type=normalized_api,
             )
-            increased_quota = int(ceil(current_quota * 1.1))
+            increased_quota = int(current_quota * 1.1)
             self._set_quota_value_for_api(
                 website=website,
                 api_type=normalized_api,
-                quota=max(increased_quota, current_quota),
+                quota=min(
+                    max(increased_quota, current_quota),
+                    self._default_quota_for_api(normalized_api),
+                ),
             )
 
         confidence_step = (
@@ -145,13 +162,7 @@ class QuotaDiscoveryService:
         )
         website.quota_discovered_at = now
 
-        if (
-            success_count >= self.SUCCESS_WINDOW_FOR_CONFIRMED
-            and website.quota_discovery_confidence
-            >= self.CONFIDENCE_THRESHOLD_CONFIRMED
-        ):
-            website.quota_discovery_status = QuotaDiscoveryStatus.CONFIRMED
-        elif success_count >= self.SUCCESS_WINDOW_FOR_ESTIMATED:
+        if success_count >= self.SUCCESS_WINDOW_FOR_ESTIMATED:
             website.quota_discovery_status = QuotaDiscoveryStatus.ESTIMATED
         else:
             website.quota_discovery_status = QuotaDiscoveryStatus.DISCOVERING
@@ -255,10 +266,10 @@ class QuotaDiscoveryService:
         raise ValueError("api_type must be one of: indexing, inspection")
 
     def _should_restart_discovery(self, *, website: Website, now: datetime) -> bool:
-        if website.quota_discovery_status in {
-            QuotaDiscoveryStatus.PENDING,
-            QuotaDiscoveryStatus.FAILED,
-        }:
+        # Only restart discovery for PENDING status (never been set)
+        # CONFIRMED, ESTIMATED, DISCOVERING, and FAILED all keep existing values
+        # FAILED specifically should NOT restart because it would override manual settings
+        if website.quota_discovery_status == QuotaDiscoveryStatus.PENDING:
             return True
         if website.quota_discovered_at is None:
             return True

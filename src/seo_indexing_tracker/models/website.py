@@ -110,6 +110,9 @@ class Website(Base):
         DateTime(timezone=True)
     )
     quota_last_429_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    internal_rate_limit_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     service_account: Mapped[ServiceAccount | None] = relationship(
         back_populates="website",

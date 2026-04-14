@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     SCHEDULER_JOBSTORE_URL: str = "sqlite:///./scheduler-jobs.sqlite"
     SCHEDULER_URL_SUBMISSION_INTERVAL_SECONDS: int = Field(default=300, ge=1)
     SCHEDULER_INDEX_VERIFICATION_INTERVAL_SECONDS: int = Field(default=900, ge=1)
+    SCHEDULER_INDEXED_REVERIFICATION_MIN_AGE_SECONDS: int = Field(default=604800, ge=0)
     SCHEDULER_SITEMAP_REFRESH_INTERVAL_SECONDS: int = Field(default=3600, ge=1)
     SCHEDULER_URL_SUBMISSION_BATCH_SIZE: int = Field(default=100, ge=1)
     SCHEDULER_INDEX_VERIFICATION_BATCH_SIZE: int = Field(default=100, ge=1)
@@ -35,6 +36,7 @@ class Settings(BaseSettings):
     SHUTDOWN_GRACE_PERIOD_SECONDS: int = Field(default=30, ge=1)
     INDEXING_DAILY_QUOTA_LIMIT: int = Field(default=200, ge=0)
     INSPECTION_DAILY_QUOTA_LIMIT: int = Field(default=2000, ge=0)
+    QUOTA_RATE_LIMIT_COOLDOWN_SECONDS: int = Field(default=3600, ge=0)
     OUTBOUND_HTTP_USER_AGENT: str = "BlueBeastBuildAgent"
 
     @field_validator("LOG_FILE", mode="before")

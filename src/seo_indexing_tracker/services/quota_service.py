@@ -204,9 +204,6 @@ class QuotaService:
         website: Website,
         settings: Settings | QuotaSettings,
     ) -> int:
-        status = website.quota_discovery_status
-        confidence = float(website.quota_discovery_confidence)
-
         if api_type is QuotaAPIType.INDEXING:
             discovered_limit = website.discovered_indexing_quota
             fallback_limit = int(settings.INDEXING_DAILY_QUOTA_LIMIT)
@@ -214,15 +211,17 @@ class QuotaService:
             discovered_limit = website.discovered_inspection_quota
             fallback_limit = int(settings.INSPECTION_DAILY_QUOTA_LIMIT)
 
-        if discovered_limit is None:
-            return fallback_limit
-        if status is QuotaDiscoveryStatus.CONFIRMED:
+        # Runtime quota gating is intentionally deterministic:
+        # - configured daily limits are the source of truth
+        # - discovery values are telemetry only
+        # - only an explicit CONFIRMED website override can replace baseline limits
+        if (
+            website.quota_discovery_status is QuotaDiscoveryStatus.CONFIRMED
+            and discovered_limit is not None
+        ):
             return int(discovered_limit)
-        if status is QuotaDiscoveryStatus.ESTIMATED and confidence >= 0.5:
-            return int(discovered_limit)
-        if status is QuotaDiscoveryStatus.DISCOVERING and confidence >= 0.8:
-            return int(discovered_limit)
-        return min(int(discovered_limit), fallback_limit)
+
+        return fallback_limit
 
     @staticmethod
     def _counter_name(api_type: QuotaAPIType) -> str:

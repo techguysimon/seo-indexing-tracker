@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 import logging
 from math import ceil
-from typing import TypedDict
+from typing import Any, TypedDict
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -27,7 +29,10 @@ from seo_indexing_tracker.api.urls import (
 )
 from seo_indexing_tracker.models import (
     ActivityLog,
+    IndexStatus,
+    IndexVerdict,
     JobExecution,
+    QuotaUsage,
     ServiceAccount,
     Sitemap,
     SitemapRefreshProgress,
@@ -36,6 +41,7 @@ from seo_indexing_tracker.models import (
     URLIndexStatus,
     Website,
 )
+from seo_indexing_tracker.models.website import QuotaDiscoveryStatus
 from seo_indexing_tracker.services.index_stats_service import IndexStatsService
 from seo_indexing_tracker.services.activity_service import ActivityService
 from seo_indexing_tracker.services.config_validation import (
@@ -44,6 +50,7 @@ from seo_indexing_tracker.services.config_validation import (
 )
 from seo_indexing_tracker.services.priority_queue import PriorityQueueService
 from seo_indexing_tracker.services.quota_discovery_service import QuotaDiscoveryService
+from seo_indexing_tracker.services.queue_eta_service import QueueETAService
 from seo_indexing_tracker.services.sitemap_fetcher import (
     SitemapFetchError,
     SitemapFetchNetworkError,
@@ -58,6 +65,13 @@ from seo_indexing_tracker.services.processing_pipeline import (
     INDEX_VERIFICATION_JOB_ID,
     SITEMAP_REFRESH_JOB_ID,
     URL_SUBMISSION_JOB_ID,
+)
+from seo_indexing_tracker.services.google_api_factory import (
+    WebsiteGoogleAPIClients,
+    WebsiteServiceAccountConfig,
+)
+from seo_indexing_tracker.utils.index_status import (
+    derive_url_index_status_from_coverage_state,
 )
 
 router = APIRouter(tags=["web"])
@@ -535,6 +549,36 @@ async def _fetch_sitemap_progress_by_sitemap_ids(
     return {row.sitemap_id: row for row in rows}
 
 
+async def _get_website_eta_context(
+    session: AsyncSession, website_id: UUID
+) -> dict[str, Any] | None:
+    """Get ETA data for a specific website."""
+    eta_service = QueueETAService(session)
+    eta = await eta_service.get_website_eta(website_id)
+    if eta is None:
+        return None
+    return {
+        "website_id": str(eta.website_id),
+        "website_domain": eta.website_domain,
+        "status": eta.status,
+        "submission_queue": {
+            "queued": eta.submission_queue.queued,
+            "quota_remaining": eta.submission_queue.quota_remaining,
+            "quota_limit": eta.submission_queue.quota_limit,
+            "eta_minutes": eta.submission_queue.eta_minutes,
+            "rate_per_minute": round(eta.submission_queue.rate_per_minute, 1),
+        },
+        "verification_queue": {
+            "queued": eta.verification_queue.queued,
+            "quota_remaining": eta.verification_queue.quota_remaining,
+            "quota_limit": eta.verification_queue.quota_limit,
+            "eta_minutes": eta.verification_queue.eta_minutes,
+            "rate_per_minute": round(eta.verification_queue.rate_per_minute, 1),
+        },
+        "quota_reset_at": eta.quota_reset_at.isoformat(),
+    }
+
+
 async def _render_website_detail(
     *,
     request: Request,
@@ -577,6 +621,7 @@ async def _render_website_detail(
             session=session,
             website_id=website_id,
         ),
+        "website_eta": await _get_website_eta_context(session, website_id),
     }
     template_name = (
         "partials/website_detail_panel.html"
@@ -706,12 +751,47 @@ async def queue_status_partial(
         )
         or 0
     )
+
+    # Fetch ETA data
+    eta_service = QueueETAService(session)
+    eta_data = await eta_service.get_all_websites_eta()
+
+    # Get quota reset time (same for all websites)
+    quota_reset_at = eta_data[0].quota_reset_at if eta_data else None
+
+    # Convert to dict format for template
+    websites_eta = []
+    for eta in eta_data:
+        websites_eta.append(
+            {
+                "website_id": str(eta.website_id),
+                "website_domain": eta.website_domain,
+                "status": eta.status,
+                "submission_queue": {
+                    "queued": eta.submission_queue.queued,
+                    "quota_remaining": eta.submission_queue.quota_remaining,
+                    "quota_limit": eta.submission_queue.quota_limit,
+                    "eta_minutes": eta.submission_queue.eta_minutes,
+                    "rate_per_minute": round(eta.submission_queue.rate_per_minute, 1),
+                },
+                "verification_queue": {
+                    "queued": eta.verification_queue.queued,
+                    "quota_remaining": eta.verification_queue.quota_remaining,
+                    "quota_limit": eta.verification_queue.quota_limit,
+                    "eta_minutes": eta.verification_queue.eta_minutes,
+                    "rate_per_minute": round(eta.verification_queue.rate_per_minute, 1),
+                },
+            }
+        )
+
     return templates.TemplateResponse(
         request=request,
         name="partials/queue_status.html",
         context={
             "queued_count": queued_count,
             "high_priority_count": high_priority_count,
+            "websites_eta": websites_eta,
+            "quota_reset_at": quota_reset_at,
         },
     )
 
@@ -1375,6 +1455,112 @@ async def discover_quota_from_web(
     )
 
 
+@router.get("/web/websites/{website_id}/quota-edit", response_class=HTMLResponse)
+@router.get("/ui/websites/{website_id}/quota-edit", response_class=HTMLResponse)
+async def quota_edit_form(
+    request: Request,
+    website_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Get the quota edit form."""
+    templates = _get_templates(request)
+    website = await session.get(Website, website_id)
+    if website is None:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    # Get current quota status
+    quota_service = QuotaDiscoveryService()
+    quota_status = await quota_service.get_discovered_limits(session, website_id)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/quota_edit_form.html",
+        context={
+            "website": website,
+            "quota_status": quota_status,
+        },
+    )
+
+
+@router.post("/web/websites/{website_id}/quota-override", response_class=HTMLResponse)
+@router.post("/ui/websites/{website_id}/quota-override", response_class=HTMLResponse)
+async def set_quota_override(
+    request: Request,
+    website_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Handle quota override form submission."""
+    templates = _get_templates(request)
+    form = await request.form()
+
+    indexing_limit = _form_int(form.get("indexing_limit"), default=0)
+    inspection_limit = _form_int(form.get("inspection_limit"), default=0)
+    indexing_used = _form_int(form.get("indexing_used"), default=0)
+    inspection_used = _form_int(form.get("inspection_used"), default=0)
+    mode = str(form.get("mode", "manual"))
+
+    website = await session.get(Website, website_id)
+    if website is None:
+        raise HTTPException(status_code=404, detail="Website not found")
+
+    now = datetime.now(UTC)
+    today = now.date()
+
+    # Get or create today's usage record
+    usage = await session.execute(
+        select(QuotaUsage).where(
+            QuotaUsage.website_id == website_id,
+            QuotaUsage.date == today,
+        )
+    )
+    usage_row = usage.scalar_one_or_none()
+
+    if usage_row is None:
+        usage_row = QuotaUsage(
+            website_id=website_id,
+            date=today,
+            indexing_count=0,
+            inspection_count=0,
+        )
+        session.add(usage_row)
+
+    # Update limits if provided
+    if indexing_limit is not None and indexing_limit > 0:
+        website.discovered_indexing_quota = indexing_limit
+    if inspection_limit is not None and inspection_limit > 0:
+        website.discovered_inspection_quota = inspection_limit
+
+    # Update used counts if provided
+    if indexing_used is not None and indexing_used >= 0:
+        usage_row.indexing_count = indexing_used
+    if inspection_used is not None and inspection_used >= 0:
+        usage_row.inspection_count = inspection_used
+
+    # Set mode
+    if mode == "auto":
+        website.quota_discovery_status = QuotaDiscoveryStatus.DISCOVERING
+    else:
+        website.quota_discovery_status = QuotaDiscoveryStatus.CONFIRMED
+        # Mark quota as discovered so it doesn't restart automatically
+        website.quota_discovered_at = datetime.now(UTC)
+
+    await session.commit()
+
+    # Get updated quota status
+    quota_service = QuotaDiscoveryService()
+    quota_status = await quota_service.get_discovered_limits(session, website_id)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/quota_edit_form.html",
+        context={
+            "website": website,
+            "quota_status": quota_status,
+            "saved": True,
+        },
+    )
+
+
 @router.get("/ui/sitemaps", response_class=Response)
 async def sitemaps_management(
     request: Request,
@@ -1468,3 +1654,360 @@ async def create_sitemap_from_web(
             "sitemap_types": [SitemapType.URLSET.value, SitemapType.INDEX.value],
         },
     )
+
+
+@router.post(
+    "/ui/websites/{website_id}/urls/{url_id}/inspect",
+    response_class=HTMLResponse,
+)
+async def inspect_single_url(
+    request: Request,
+    website_id: UUID,
+    url_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Inspect a single URL via Google URL Inspection API, bypassing rate limits."""
+    templates = _get_templates(request)
+
+    url_record = await session.get(URL, url_id)
+    if url_record is None or url_record.website_id != website_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="URL not found",
+        )
+
+    website = await session.get(Website, website_id)
+    if website is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Website not found",
+        )
+
+    service_account = await session.scalar(
+        select(ServiceAccount).where(ServiceAccount.website_id == website_id)
+    )
+    if service_account is None:
+        item = await _build_url_item(session, url_id)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/website_url_row.html",
+            context={
+                "website": website,
+                "item": item,
+                "error_message": "No service account configured",
+            },
+        )
+
+    try:
+        clients = WebsiteGoogleAPIClients(
+            config=WebsiteServiceAccountConfig(
+                credentials_path=service_account.credentials_path
+            )
+        )
+        result = await asyncio.to_thread(
+            clients.search_console.inspect_url_sync,
+            url_record.url,
+            website.site_url,
+        )
+    except Exception as error:
+        item = await _build_url_item(session, url_id)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/website_url_row.html",
+            context={
+                "website": website,
+                "item": item,
+                "error_message": f"Request failed: {error}",
+            },
+        )
+
+    if result.http_status == 429:
+        item = await _build_url_item(session, url_id)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/website_url_row.html",
+            context={
+                "website": website,
+                "item": item,
+                "error_message": "Rate limited by Google, please try again later",
+            },
+        )
+
+    if result.error_code == "AUTH_ERROR":
+        item = await _build_url_item(session, url_id)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/website_url_row.html",
+            context={
+                "website": website,
+                "item": item,
+                "error_message": "Authentication failed, check service account",
+            },
+        )
+
+    if not result.success:
+        item = await _build_url_item(session, url_id)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/website_url_row.html",
+            context={
+                "website": website,
+                "item": item,
+                "error_message": result.error_message or "Inspection failed",
+            },
+        )
+
+    checked_at = datetime.now(UTC)
+    raw_response = result.raw_response or {}
+    index_status_result = _extract_index_status_result(raw_response)
+
+    index_status = IndexStatus(
+        url_id=url_id,
+        coverage_state=result.coverage_state or "INSPECTION_FAILED",
+        verdict=_index_verdict(result.verdict),
+        last_crawl_time=result.last_crawl_time,
+        indexed_at=result.last_crawl_time,
+        checked_at=checked_at,
+        robots_txt_state=result.robots_txt_state,
+        indexing_state=result.indexing_state,
+        page_fetch_state=_optional_text(index_status_result.get("pageFetchState")),
+        google_canonical=_optional_text(index_status_result.get("googleCanonical")),
+        user_canonical=_optional_text(index_status_result.get("userCanonical")),
+        raw_response=raw_response,
+    )
+    session.add(index_status)
+
+    derived_status = derive_url_index_status_from_coverage_state(
+        result.coverage_state or "INSPECTION_FAILED"
+    )
+    url_record.latest_index_status = derived_status
+    url_record.last_checked_at = checked_at
+    await session.flush()
+
+    item = await _build_url_item(session, url_id)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/website_url_row.html",
+        context={
+            "website": website,
+            "item": item,
+        },
+    )
+
+
+@router.post(
+    "/ui/websites/{website_id}/urls/{url_id}/submit",
+    response_class=HTMLResponse,
+)
+async def submit_single_url(
+    request: Request,
+    website_id: UUID,
+    url_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Submit a single URL via Google Indexing API, bypassing rate limits."""
+    templates = _get_templates(request)
+
+    url_record = await session.get(URL, url_id)
+    if url_record is None or url_record.website_id != website_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="URL not found",
+        )
+
+    website = await session.get(Website, website_id)
+    if website is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Website not found",
+        )
+
+    service_account = await session.scalar(
+        select(ServiceAccount).where(ServiceAccount.website_id == website_id)
+    )
+    if service_account is None:
+        item = await _build_url_item(session, url_id)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/website_url_row.html",
+            context={
+                "website": website,
+                "item": item,
+                "error_message": "No service account configured",
+            },
+        )
+
+    try:
+        clients = WebsiteGoogleAPIClients(
+            config=WebsiteServiceAccountConfig(
+                credentials_path=service_account.credentials_path
+            )
+        )
+        result = await asyncio.to_thread(
+            clients.indexing.submit_url_sync,
+            url_record.url,
+            "URL_UPDATED",
+        )
+    except Exception as error:
+        item = await _build_url_item(session, url_id)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/website_url_row.html",
+            context={
+                "website": website,
+                "item": item,
+                "error_message": f"Request failed: {error}",
+            },
+        )
+
+    if result.http_status == 429:
+        item = await _build_url_item(session, url_id)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/website_url_row.html",
+            context={
+                "website": website,
+                "item": item,
+                "error_message": "Rate limited by Google, please try again later",
+            },
+        )
+
+    if result.error_code == "AUTH_ERROR":
+        item = await _build_url_item(session, url_id)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/website_url_row.html",
+            context={
+                "website": website,
+                "item": item,
+                "error_message": "Authentication failed, check service account",
+            },
+        )
+
+    if not result.success:
+        item = await _build_url_item(session, url_id)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/website_url_row.html",
+            context={
+                "website": website,
+                "item": item,
+                "error_message": result.error_message or "Submission failed",
+            },
+        )
+
+    url_record.last_submitted_at = datetime.now(UTC)
+    await session.flush()
+
+    item = await _build_url_item(session, url_id)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/website_url_row.html",
+        context={
+            "website": website,
+            "item": item,
+        },
+    )
+
+
+async def _build_url_item(
+    session: AsyncSession,
+    url_id: UUID,
+) -> dict[str, Any]:
+    """Build a URL item dict matching WebsiteURLListItem structure."""
+    latest_status_subquery = (
+        select(
+            IndexStatus.url_id.label("url_id"),
+            func.max(IndexStatus.checked_at).label("checked_at"),
+        )
+        .where(IndexStatus.url_id == url_id)
+        .group_by(IndexStatus.url_id)
+        .subquery()
+    )
+
+    row = await session.execute(
+        select(
+            URL.url,
+            URL.latest_index_status,
+            URL.last_checked_at,
+            URL.last_submitted_at,
+            URL.sitemap_id,
+            IndexStatus.verdict,
+            IndexStatus.coverage_state,
+            IndexStatus.last_crawl_time,
+            IndexStatus.google_canonical,
+            IndexStatus.user_canonical,
+        )
+        .where(URL.id == url_id)
+        .outerjoin(latest_status_subquery, latest_status_subquery.c.url_id == URL.id)
+        .outerjoin(
+            IndexStatus,
+            (IndexStatus.url_id == latest_status_subquery.c.url_id)
+            & (IndexStatus.checked_at == latest_status_subquery.c.checked_at),
+        )
+    )
+    result = row.first()
+    if result is None:
+        return {
+            "id": url_id,
+            "url": "",
+            "latest_index_status": URLIndexStatus.UNCHECKED,
+            "last_checked_at": None,
+            "last_submitted_at": None,
+            "sitemap_id": None,
+            "verdict": None,
+            "coverage_state": None,
+            "last_crawl_time": None,
+            "google_canonical": None,
+            "user_canonical": None,
+        }
+
+    return {
+        "id": url_id,
+        "url": result.url,
+        "latest_index_status": result.latest_index_status,
+        "last_checked_at": result.last_checked_at,
+        "last_submitted_at": result.last_submitted_at,
+        "sitemap_id": result.sitemap_id,
+        "verdict": result.verdict,
+        "coverage_state": result.coverage_state,
+        "last_crawl_time": result.last_crawl_time,
+        "google_canonical": result.google_canonical,
+        "user_canonical": result.user_canonical,
+    }
+
+
+def _extract_index_status_result(raw_response: dict[str, Any]) -> dict[str, Any]:
+    """Extract indexStatusResult from raw API response."""
+    inspection_result = raw_response.get("inspectionResult")
+    if not isinstance(inspection_result, dict):
+        return {}
+    index_status_result = inspection_result.get("indexStatusResult")
+    if not isinstance(index_status_result, dict):
+        return {}
+    return index_status_result
+
+
+def _index_verdict(verdict: str | None) -> IndexVerdict:
+    """Convert verdict string to IndexVerdict enum."""
+    if verdict is None:
+        return IndexVerdict.NEUTRAL
+
+    normalized_verdict = verdict.strip().upper()
+    if normalized_verdict in {
+        IndexVerdict.PASS.value,
+        IndexVerdict.FAIL.value,
+        IndexVerdict.NEUTRAL.value,
+        IndexVerdict.PARTIAL.value,
+    }:
+        return IndexVerdict(normalized_verdict)
+
+    return IndexVerdict.NEUTRAL
+
+
+def _optional_text(value: Any) -> str | None:
+    """Extract optional text from response value."""
+    if isinstance(value, str):
+        stripped_value = value.strip()
+        return stripped_value if stripped_value != "" else None
+    return None

@@ -1,0 +1,56 @@
+{% set canonical_mismatch = item.google_canonical and item.user_canonical and item.google_canonical != item.user_canonical %}
+<tr>
+  <td class="url-cell-truncate" title="{{ item.url }}">{{ item.url }}</td>
+  <td>
+    <span class="status-badge status-{{ item.latest_index_status.value | lower | replace('_', '-') }}">
+      {{ item.latest_index_status.value }}
+    </span>
+  </td>
+  <td>
+    {% if item.last_submitted_at %}
+    <span class="pill pill-success">Submitted</span>
+    <small>{{ item.last_submitted_at.strftime('%Y-%m-%d %H:%M') }}</small>
+    {% else %}
+    <span class="pill">Not submitted</span>
+    {% endif %}
+  </td>
+  <td>{{ item.last_checked_at or "-" }}</td>
+  <td>{{ item.last_crawl_time or "-" }}</td>
+  <td>{{ item.coverage_state or "-" }}</td>
+  <td>
+    {% if canonical_mismatch %}
+    <span class="pill pill-warn">Mismatch</span>
+    <div class="canonical-notes">
+      <small>Google: {{ item.google_canonical }}</small>
+      <small>User: {{ item.user_canonical }}</small>
+    </div>
+    {% elif item.google_canonical or item.user_canonical %}
+    <small>{{ item.google_canonical or item.user_canonical }}</small>
+    {% else %}
+    -
+    {% endif %}
+  </td>
+  <td class="actions-cell">
+    {% if error_message %}
+    <div class="inline-error" style="color: var(--color-error, #dc3545); font-size: 0.85em; margin-bottom: 0.25rem;">
+      {{ error_message }}
+    </div>
+    {% endif %}
+    <button
+      class="btn-sm btn-outline-primary"
+      hx-post="/ui/websites/{{ website.id }}/urls/{{ item.id }}/inspect"
+      hx-target="closest tr"
+      hx-swap="outerHTML"
+      hx-indicator="this"
+      hx-disabled-elt="this"
+    >Inspect</button>
+    <button
+      class="btn-sm btn-outline-secondary"
+      hx-post="/ui/websites/{{ website.id }}/urls/{{ item.id }}/submit"
+      hx-target="closest tr"
+      hx-swap="outerHTML"
+      hx-indicator="this"
+      hx-disabled-elt="this"
+    >Submit</button>
+  </td>
+</tr>

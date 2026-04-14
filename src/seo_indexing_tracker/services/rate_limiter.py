@@ -259,6 +259,10 @@ class RateLimiterService:
             raise RateLimitTimeoutError(
                 "Timed out waiting for concurrency slot"
             ) from error
+        except asyncio.CancelledError:
+            # Re-raise cancellation so caller can handle it appropriately
+            # (e.g., job timeout in processing_pipeline.py)
+            raise
 
     async def _consume_token(
         self,

@@ -1,0 +1,45 @@
+{% if saved %}
+<div class="alert alert-success">
+  Quota updated successfully!
+</div>
+{% endif %}
+
+<form 
+  hx-post="/ui/websites/{{ website.id }}/quota-override"
+  hx-target="#quota-edit-container"
+  hx-swap="innerHTML"
+  class="quota-form"
+>
+  <h4>Manual Quota Override</h4>
+  
+  <div class="form-row">
+    <label>
+      Indexing API Limit
+      <input type="number" name="indexing_limit" value="{{ quota_status.indexing.limit }}" min="1">
+    </label>
+    <label>
+      Used Today
+      <input type="number" name="indexing_used" value="{{ quota_status.indexing.used }}" min="0">
+    </label>
+  </div>
+  
+  <div class="form-row">
+    <label>
+      Inspection API Limit
+      <input type="number" name="inspection_limit" value="{{ quota_status.inspection.limit }}" min="1">
+    </label>
+    <label>
+      Used Today
+      <input type="number" name="inspection_used" value="{{ quota_status.inspection.used }}" min="0">
+    </label>
+  </div>
+  
+  <div class="form-row">
+    <label class="checkbox-label">
+      <input type="checkbox" name="mode" value="auto">
+      Reset to auto-discovery mode
+    </label>
+  </div>
+  
+  <button type="submit" class="btn btn-primary">Save</button>
+</form>

@@ -7,12 +7,12 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Any, Protocol, cast
 from uuid import UUID
 
-from sqlalchemy import func, insert, nullsfirst, select
+from sqlalchemy import and_, case, func, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seo_indexing_tracker.config import Settings
@@ -37,12 +37,15 @@ from seo_indexing_tracker.services.google_url_inspection_client import (
     InspectionSystemStatus,
 )
 from seo_indexing_tracker.services.priority_queue import PriorityQueueService
-from seo_indexing_tracker.services.quota_service import QuotaService
+from seo_indexing_tracker.services.quota_service import (
+    DailyQuotaExceededError,
+    QuotaService,
+)
 from seo_indexing_tracker.services.rate_limiter import (
     ConcurrentRequestLimitExceededError,
+    RateLimiterService,
     RateLimitTimeoutError,
     RateLimitTokenUnavailableError,
-    RateLimiterService,
 )
 from seo_indexing_tracker.services.scheduler import SchedulerService
 from seo_indexing_tracker.services.url_discovery import URLDiscoveryService
@@ -57,6 +60,8 @@ _pipeline_service: SchedulerProcessingPipelineService | None = None
 URL_SUBMISSION_JOB_ID = "url-submission-job"
 INDEX_VERIFICATION_JOB_ID = "index-verification-job"
 SITEMAP_REFRESH_JOB_ID = "sitemap-refresh-job"
+DEFAULT_RATE_LIMIT_ACQUIRE_TIMEOUT_SECONDS = 10.0
+DEFAULT_INDEXED_REVERIFICATION_MIN_AGE_SECONDS = 7 * 24 * 60 * 60
 
 
 @dataclass(slots=True)
@@ -88,7 +93,20 @@ class JobRunResult:
 @dataclass(slots=True, frozen=True)
 class _WebsiteCredentials:
     website_id: UUID
+    domain: str
     credentials_path: str
+    quota_last_429_at: datetime | None
+    internal_rate_limit_at: datetime | None
+
+
+@dataclass(slots=True, frozen=True)
+class _SubmissionCooldownWindow:
+    website_id: UUID
+    domain: str
+    last_429_at: datetime
+    cooldown_seconds: int
+    next_allowed_at: datetime
+    is_internal_rate_limit: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -230,6 +248,24 @@ class _OverlapProtectedRunner:
                     checkpoint_data=None,
                     error_message=str(error),
                 )
+            except asyncio.CancelledError:
+                # Job was cancelled (e.g., timeout, scheduler shutdown, or removed).
+                # Mark as failed rather than crashing.
+                metrics.failed_runs += 1
+                metrics.last_error = "Job cancelled"
+                _job_logger.warning(
+                    "scheduler_pipeline_job_cancelled",
+                    extra={"job_id": job_id},
+                )
+                await self._finish_job_execution(
+                    execution_id=execution_id,
+                    status="failed",
+                    urls_processed=None,
+                    checkpoint_data=None,
+                    error_message="Job cancelled (timeout or shutdown)",
+                )
+                # Re-raise to properly cancel the task
+                raise
             finally:
                 metrics.running = False
                 metrics.last_finished_at = datetime.now(UTC)
@@ -474,6 +510,48 @@ class SchedulerProcessingPipelineService:
             )
 
         for website in website_credentials:
+            cooldown_window = self._submission_cooldown_window(website)
+            if cooldown_window is not None:
+                # Build metadata based on cooldown type
+                if cooldown_window.is_internal_rate_limit:
+                    cooldown_metadata = {
+                        "website_domain": website.domain,
+                        "cooldown_type": "internal_rate_limit",
+                        "internal_rate_limit_at": cooldown_window.last_429_at.isoformat(),
+                        "cooldown_seconds": cooldown_window.cooldown_seconds,
+                        "next_allowed_at": cooldown_window.next_allowed_at.isoformat(),
+                    }
+                    log_message = "Skipped URL submission because internal rate-limit cooldown is active"
+                else:
+                    cooldown_metadata = {
+                        "website_domain": website.domain,
+                        "cooldown_type": "google_429",
+                        "quota_last_429_at": cooldown_window.last_429_at.isoformat(),
+                        "cooldown_seconds": cooldown_window.cooldown_seconds,
+                        "next_allowed_at": cooldown_window.next_allowed_at.isoformat(),
+                    }
+                    log_message = (
+                        "Skipped URL submission because Google 429 cooldown is active"
+                    )
+
+                await self._log_activity(
+                    event_type="url_submission_skipped_rate_limited",
+                    website_id=website.website_id,
+                    resource_type="website",
+                    resource_id=website.website_id,
+                    message=log_message,
+                    metadata=cooldown_metadata,
+                )
+                _job_logger.info(
+                    "submit_urls_skipped_rate_limit_cooldown",
+                    extra={
+                        "website_id": str(website.website_id),
+                        "website_domain": website.domain,
+                        **cooldown_metadata,
+                    },
+                )
+                continue
+
             _job_logger.debug(
                 "submit_urls_processing_website",
                 extra={
@@ -567,6 +645,35 @@ class SchedulerProcessingPipelineService:
         failed_urls = 0
 
         for website in website_credentials:
+            cooldown_window = self._submission_cooldown_window(website)
+            if cooldown_window is not None:
+                # Build log extra based on cooldown type
+                if cooldown_window.is_internal_rate_limit:
+                    log_extra = {
+                        "website_id": str(website.website_id),
+                        "website_domain": website.domain,
+                        "cooldown_type": "internal_rate_limit",
+                        "internal_rate_limit_at": cooldown_window.last_429_at.isoformat(),
+                        "cooldown_seconds": cooldown_window.cooldown_seconds,
+                        "next_allowed_at": cooldown_window.next_allowed_at.isoformat(),
+                        "job": "verification",
+                    }
+                else:
+                    log_extra = {
+                        "website_id": str(website.website_id),
+                        "website_domain": website.domain,
+                        "cooldown_type": "google_429",
+                        "quota_last_429_at": cooldown_window.last_429_at.isoformat(),
+                        "cooldown_seconds": cooldown_window.cooldown_seconds,
+                        "next_allowed_at": cooldown_window.next_allowed_at.isoformat(),
+                        "job": "verification",
+                    }
+                _job_logger.info(
+                    "verify_index_skipped_rate_limit_cooldown",
+                    extra=log_extra,
+                )
+                continue
+
             _job_logger.debug(
                 "verify_index_processing_website",
                 extra={"website_id": str(website.website_id)},
@@ -591,12 +698,18 @@ class SchedulerProcessingPipelineService:
             ).search_console
             inspection_rows: list[dict[str, object]] = []
             results_by_url_id: dict[UUID, IndexStatusResult] = {}
+            saw_google_429 = False
+            saw_internal_rate_limit = False
             for candidate in candidate_urls:
                 result = await self._inspect_single_url(
                     website_id=website.website_id,
                     candidate=candidate,
                     client=inspection_client,
                 )
+                if result.http_status == 429:
+                    saw_google_429 = True
+                elif self._is_transient_quota_error_code(result.error_code):
+                    saw_internal_rate_limit = True
                 inspection_rows.append(
                     self._index_status_row(url_id=candidate.url_id, result=result)
                 )
@@ -613,9 +726,23 @@ class SchedulerProcessingPipelineService:
                 url_by_id = {url.id: url for url in urls}
 
                 checked_at = datetime.now(UTC)
+                website_row = await session.get(Website, website.website_id)
+                if website_row is not None:
+                    # Only set quota_last_429_at for actual Google HTTP 429 responses
+                    # This triggers the long cooldown for genuine quota exhaustion
+                    if saw_google_429:
+                        website_row.quota_last_429_at = checked_at
+                    # Set internal_rate_limit_at for our own rate limiter backpressure
+                    # This is for internal token bucket exhaustion, not Google rejecting
+                    if saw_internal_rate_limit:
+                        website_row.internal_rate_limit_at = checked_at
+
                 for url_id, result in results_by_url_id.items():
                     url = url_by_id.get(url_id)
                     if url is None:
+                        continue
+                    if self._is_transient_quota_error_code(result.error_code):
+                        # Preserve denormalized URL status during transient quota/rate-limit outages.
                         continue
                     coverage_state = result.coverage_state or "INSPECTION_FAILED"
                     derived_status = derive_url_index_status_from_coverage_state(
@@ -694,7 +821,13 @@ class SchedulerProcessingPipelineService:
     ) -> list[_WebsiteCredentials]:
         async with session_scope() as session:
             statement = (
-                select(Website.id, ServiceAccount.credentials_path)
+                select(
+                    Website.id,
+                    Website.domain,
+                    ServiceAccount.credentials_path,
+                    Website.quota_last_429_at,
+                    Website.internal_rate_limit_at,
+                )
                 .join(ServiceAccount, ServiceAccount.website_id == Website.id)
                 .where(Website.is_active.is_(True))
             )
@@ -708,31 +841,107 @@ class SchedulerProcessingPipelineService:
 
             rows = (await session.execute(statement)).all()
             return [
-                _WebsiteCredentials(website_id=row[0], credentials_path=row[1])
+                _WebsiteCredentials(
+                    website_id=row[0],
+                    domain=row[1],
+                    credentials_path=row[2],
+                    quota_last_429_at=row[3],
+                    internal_rate_limit_at=row[4],
+                )
                 for row in rows
             ]
+
+    def _is_submission_cooldown_active(self, website: _WebsiteCredentials) -> bool:
+        return self._submission_cooldown_window(website) is not None
+
+    def _submission_cooldown_window(
+        self, website: _WebsiteCredentials
+    ) -> _SubmissionCooldownWindow | None:
+        cooldown_seconds = int(self._settings.QUOTA_RATE_LIMIT_COOLDOWN_SECONDS)
+        if cooldown_seconds <= 0:
+            return None
+
+        now = datetime.now(UTC)
+
+        # First check for Google HTTP 429 cooldown (higher priority)
+        if website.quota_last_429_at is not None:
+            normalized_last_429_at = website.quota_last_429_at
+            if normalized_last_429_at.tzinfo is None:
+                normalized_last_429_at = normalized_last_429_at.replace(tzinfo=UTC)
+
+            next_allowed_at = normalized_last_429_at + timedelta(
+                seconds=cooldown_seconds
+            )
+            if now < next_allowed_at:
+                return _SubmissionCooldownWindow(
+                    website_id=website.website_id,
+                    domain=website.domain,
+                    last_429_at=normalized_last_429_at,
+                    cooldown_seconds=cooldown_seconds,
+                    next_allowed_at=next_allowed_at,
+                    is_internal_rate_limit=False,
+                )
+
+        # Then check for internal rate limit cooldown
+        if website.internal_rate_limit_at is not None:
+            normalized_internal_at = website.internal_rate_limit_at
+            if normalized_internal_at.tzinfo is None:
+                normalized_internal_at = normalized_internal_at.replace(tzinfo=UTC)
+
+            next_allowed_at = normalized_internal_at + timedelta(
+                seconds=cooldown_seconds
+            )
+            if now < next_allowed_at:
+                return _SubmissionCooldownWindow(
+                    website_id=website.website_id,
+                    domain=website.domain,
+                    last_429_at=normalized_internal_at,
+                    cooldown_seconds=cooldown_seconds,
+                    next_allowed_at=next_allowed_at,
+                    is_internal_rate_limit=True,
+                )
+
+        return None
 
     async def _pick_urls_for_verification(
         self,
         website_id: UUID,
     ) -> list[_VerificationCandidate]:
-        latest_status = (
-            select(
-                IndexStatus.url_id.label("url_id"),
-                func.max(IndexStatus.checked_at).label("last_checked_at"),
-            )
-            .group_by(IndexStatus.url_id)
-            .subquery()
+        indexed_reverification_cutoff = (
+            datetime.now(UTC) - self._indexed_reverification_min_age()
         )
-
         async with session_scope() as session:
             statement = (
                 select(URL.id, URL.url, Website.site_url)
                 .join(Website, Website.id == URL.website_id)
-                .outerjoin(latest_status, latest_status.c.url_id == URL.id)
-                .where(URL.website_id == website_id)
+                .where(
+                    URL.website_id == website_id,
+                    or_(
+                        URL.latest_index_status.in_(
+                            ["UNCHECKED", "NOT_INDEXED", "ERROR"]
+                        ),
+                        and_(
+                            URL.latest_index_status == "INDEXED",
+                            or_(
+                                URL.last_checked_at.is_(None),
+                                URL.last_checked_at <= indexed_reverification_cutoff,
+                            ),
+                        ),
+                    ),
+                )
                 .order_by(
-                    nullsfirst(latest_status.c.last_checked_at),
+                    case(
+                        (URL.latest_index_status == "ERROR", 0),
+                        (URL.latest_index_status == "NOT_INDEXED", 1),
+                        (URL.latest_index_status == "UNCHECKED", 2),
+                        (URL.latest_index_status == "INDEXED", 3),
+                        else_=4,
+                    ),
+                    case(
+                        (URL.last_checked_at.is_(None), 0),
+                        else_=1,
+                    ),
+                    URL.last_checked_at.asc(),
                     URL.updated_at.desc(),
                 )
                 .limit(self._settings.SCHEDULER_INDEX_VERIFICATION_BATCH_SIZE)
@@ -743,6 +952,20 @@ class SchedulerProcessingPipelineService:
                 for row in rows
             ]
 
+    def _indexed_reverification_min_age(self) -> timedelta:
+        configured_age_seconds = getattr(
+            self._settings,
+            "SCHEDULER_INDEXED_REVERIFICATION_MIN_AGE_SECONDS",
+            None,
+        )
+        if (
+            isinstance(configured_age_seconds, int | float)
+            and configured_age_seconds >= 0
+        ):
+            return timedelta(seconds=float(configured_age_seconds))
+
+        return timedelta(seconds=DEFAULT_INDEXED_REVERIFICATION_MIN_AGE_SECONDS)
+
     async def _inspect_single_url(
         self,
         *,
@@ -751,16 +974,10 @@ class SchedulerProcessingPipelineService:
         client: _InspectionClient,
     ) -> IndexStatusResult:
         try:
-            permit = await self._rate_limiter.acquire(website_id, api_type="inspection")
-        except Exception as error:
-            is_rate_limit_error = isinstance(
-                error,
-                (
-                    RateLimitTokenUnavailableError,
-                    RateLimitTimeoutError,
-                    ConcurrentRequestLimitExceededError,
-                ),
+            permit = await self._acquire_inspection_rate_limit_permit(
+                website_id=website_id
             )
+        except DailyQuotaExceededError as error:
             return IndexStatusResult(
                 inspection_url=candidate.url,
                 site_url=candidate.site_url,
@@ -773,10 +990,47 @@ class SchedulerProcessingPipelineService:
                 indexing_state=None,
                 robots_txt_state=None,
                 raw_response=None,
-                error_code="RATE_LIMITED"
-                if is_rate_limit_error
-                else "RATE_LIMITER_ERROR",
+                error_code="QUOTA_EXCEEDED",
                 error_message=str(error),
+                retry_after_seconds=None,
+            )
+        except (
+            RateLimitTimeoutError,
+            RateLimitTokenUnavailableError,
+            ConcurrentRequestLimitExceededError,
+            TimeoutError,
+        ) as error:
+            return IndexStatusResult(
+                inspection_url=candidate.url,
+                site_url=candidate.site_url,
+                success=False,
+                http_status=None,
+                system_status=InspectionSystemStatus.UNKNOWN,
+                verdict=None,
+                coverage_state=None,
+                last_crawl_time=None,
+                indexing_state=None,
+                robots_txt_state=None,
+                raw_response=None,
+                error_code="RATE_LIMITED",
+                error_message=str(error),
+                retry_after_seconds=None,
+            )
+        except Exception:
+            return IndexStatusResult(
+                inspection_url=candidate.url,
+                site_url=candidate.site_url,
+                success=False,
+                http_status=None,
+                system_status=InspectionSystemStatus.UNKNOWN,
+                verdict=None,
+                coverage_state=None,
+                last_crawl_time=None,
+                indexing_state=None,
+                robots_txt_state=None,
+                raw_response=None,
+                error_code="RATE_LIMITER_ERROR",
+                error_message="Failed to acquire inspection rate-limit permit",
                 retry_after_seconds=None,
             )
 
@@ -811,6 +1065,35 @@ class SchedulerProcessingPipelineService:
             )
         finally:
             permit.release()
+
+    def _inspection_acquire_timeout_seconds(self) -> float:
+        configured_timeout = getattr(
+            self._settings,
+            "RATE_LIMIT_ACQUIRE_TIMEOUT_SECONDS",
+            None,
+        )
+        if isinstance(configured_timeout, int | float) and configured_timeout > 0:
+            return float(configured_timeout)
+
+        return DEFAULT_RATE_LIMIT_ACQUIRE_TIMEOUT_SECONDS
+
+    async def _acquire_inspection_rate_limit_permit(self, *, website_id: UUID) -> Any:
+        timeout_seconds = self._inspection_acquire_timeout_seconds()
+        try:
+            return await self._rate_limiter.acquire(
+                website_id,
+                api_type="inspection",
+                timeout_seconds=timeout_seconds,
+            )
+        except TypeError as error:
+            if "timeout_seconds" not in str(error):
+                raise
+
+            return await self._rate_limiter.acquire(website_id, api_type="inspection")
+
+    @staticmethod
+    def _is_transient_quota_error_code(error_code: str | None) -> bool:
+        return error_code in {"RATE_LIMITED", "QUOTA_EXCEEDED"}
 
     @staticmethod
     def _index_status_row(

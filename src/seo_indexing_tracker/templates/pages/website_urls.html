@@ -77,6 +77,7 @@
           <th>Last Crawl Time</th>
           <th>Coverage State</th>
           <th>Canonical</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -113,10 +114,28 @@
             -
             {% endif %}
           </td>
+          <td class="actions-cell">
+            <button
+              class="btn-sm btn-outline-primary"
+              hx-post="/ui/websites/{{ website.id }}/urls/{{ item.id }}/inspect"
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+              hx-indicator="this"
+              hx-disabled-elt="this"
+            >Inspect</button>
+            <button
+              class="btn-sm btn-outline-secondary"
+              hx-post="/ui/websites/{{ website.id }}/urls/{{ item.id }}/submit"
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+              hx-indicator="this"
+              hx-disabled-elt="this"
+            >Submit</button>
+          </td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="7">No URLs matched your filters.</td>
+          <td colspan="8">No URLs matched your filters.</td>
         </tr>
         {% endfor %}
       </tbody>

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from secrets import compare_digest
 from math import ceil
 from typing import Literal
@@ -23,6 +23,7 @@ from seo_indexing_tracker.services.processing_pipeline import (
     SchedulerProcessingPipelineService,
 )
 from seo_indexing_tracker.services import PriorityQueueService
+from seo_indexing_tracker.services.queue_eta_service import QueueETAService
 
 router = APIRouter(prefix="/api/queue", tags=["queue"])
 
@@ -132,6 +133,34 @@ class QueueForceResubmitResponse(BaseModel):
 
     website_id: UUID
     affected_count: int
+
+
+class QueueETAData(BaseModel):
+    """ETA data for a single queue."""
+
+    queued: int
+    quota_remaining: int
+    quota_limit: int
+    eta_minutes: int | None
+    rate_per_minute: float
+
+
+class WebsiteETAData(BaseModel):
+    """Complete ETA data for a website."""
+
+    website_id: UUID
+    website_domain: str
+    submission_queue: QueueETAData
+    verification_queue: QueueETAData
+    quota_reset_at: datetime
+    status: str  # active, paused, complete
+
+
+class QueueETAStatusResponse(BaseModel):
+    """Response containing ETA for all websites."""
+
+    websites_eta: list[WebsiteETAData]
+    quota_reset_at: datetime
 
 
 def _get_queue_admin_token() -> str:
@@ -763,4 +792,33 @@ async def force_resubmit_urls(
     return QueueForceResubmitResponse(
         website_id=website_id,
         affected_count=affected_count,
+    )
+
+
+@router.get("/eta", status_code=status.HTTP_200_OK)
+async def queue_eta_status(
+    session: AsyncSession = Depends(get_db_session),
+) -> QueueETAStatusResponse:
+    """Get ETA status for all websites' queues."""
+    service = QueueETAService(session)
+    etas = await service.get_all_websites_eta()
+
+    # Get quota reset time (same for all websites)
+    reset_time = (
+        etas[0].quota_reset_at if etas else datetime.now(UTC) + timedelta(days=1)
+    )
+
+    return QueueETAStatusResponse(
+        websites_eta=[
+            WebsiteETAData(
+                website_id=eta.website_id,
+                website_domain=eta.website_domain,
+                submission_queue=QueueETAData(**eta.submission_queue.__dict__),
+                verification_queue=QueueETAData(**eta.verification_queue.__dict__),
+                quota_reset_at=eta.quota_reset_at,
+                status=eta.status,
+            )
+            for eta in etas
+        ],
+        quota_reset_at=reset_time,
     )

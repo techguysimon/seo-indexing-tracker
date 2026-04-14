@@ -65,7 +65,14 @@ def _datetime_relative(value: datetime | None) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
 
-    delta = now - value
+    # Convert to Eastern Time (handles both EST and EDT automatically)
+    from zoneinfo import ZoneInfo
+
+    eastern_tz = ZoneInfo("America/New_York")
+    now_eastern = now.astimezone(eastern_tz)
+    value_eastern = value.astimezone(eastern_tz)
+
+    delta = now_eastern - value_eastern
 
     if delta < timedelta(seconds=60):
         return "just now"
@@ -79,7 +86,7 @@ def _datetime_relative(value: datetime | None) -> str:
         days = int(delta.total_seconds() / 86400)
         return f"{days} day ago" if days == 1 else f"{days} days ago"
 
-    return value.strftime("%Y-%m-%d %H:%M")
+    return value_eastern.strftime("%Y-%m-%d %H:%M %Z")
 
 
 def _initialize_lifecycle_state(app: FastAPI) -> None:

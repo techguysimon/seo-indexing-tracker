@@ -257,6 +257,7 @@ def parse_google_http_error(
             "status_code": status_code,
             "error_type": parsed_error.__class__.__name__,
             "error_message": parsed_error.message,
+            "reason": reason_text,
         },
     )
     return parsed_error
@@ -315,6 +316,7 @@ def retry_google_api_call(
                             "attempt": attempt + 1,
                             "max_retries": max_retries,
                             "status_code": parsed_error.status_code,
+                            "error_message": parsed_error.message,
                         },
                     )
                 except GoogleAPIError as error:
@@ -331,6 +333,7 @@ def retry_google_api_call(
                             "attempt": attempt + 1,
                             "max_retries": max_retries,
                             "status_code": error.status_code,
+                            "error_message": error.message,
                         },
                     )
 

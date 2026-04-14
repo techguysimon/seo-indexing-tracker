@@ -28,6 +28,55 @@
       <span>Indexed URLs: {{ index_stats.indexed_count }}</span>
       <span>Not indexed URLs: {{ index_stats.not_indexed_count }}</span>
       <span>Coverage: {{ index_stats.coverage_percentage }}%</span>
+      <div class="quota-override">
+        <button 
+          class="btn btn-small" 
+          hx-get="/ui/websites/{{ website.id }}/quota-edit"
+          hx-target="#quota-edit-container"
+          hx-swap="innerHTML"
+        >
+          Set Quota
+        </button>
+        <div id="quota-edit-container"></div>
+      </div>
+      {% if website_eta %}
+      <section class="eta-section">
+        <h3>Queue Status</h3>
+        <div class="eta-grid">
+          <div class="eta-queue">
+            <strong>Submission Queue</strong>
+            <span>Queued: {{ website_eta.submission_queue.queued }}</span>
+            <span>Rate: {{ website_eta.submission_queue.rate_per_minute }} URLs/min</span>
+            {% if website_eta.status == 'paused' %}
+            <span class="pill pill-dim">Paused</span>
+            {% elif website_eta.submission_queue.eta_minutes is none %}
+            <span class="pill pill-success">Complete</span>
+            {% elif website_eta.submission_queue.quota_remaining == 0 %}
+            <span class="pill pill-warning">Waiting for quota</span>
+            <span>ETA: {{ website_eta.submission_queue.eta_minutes }} min</span>
+            {% else %}
+            <span>ETA: ~{{ website_eta.submission_queue.eta_minutes }} min</span>
+            {% endif %}
+          </div>
+          <div class="eta-queue">
+            <strong>Verification Queue</strong>
+            <span>Queued: {{ website_eta.verification_queue.queued }}</span>
+            <span>Rate: {{ website_eta.verification_queue.rate_per_minute }} URLs/min</span>
+            {% if website_eta.status == 'paused' %}
+            <span class="pill pill-dim">Paused</span>
+            {% elif website_eta.verification_queue.eta_minutes is none %}
+            <span class="pill pill-success">Complete</span>
+            {% elif website_eta.verification_queue.quota_remaining == 0 %}
+            <span class="pill pill-warning">Waiting for quota</span>
+            <span>ETA: {{ website_eta.verification_queue.eta_minutes }} min</span>
+            {% else %}
+            <span>ETA: ~{{ website_eta.verification_queue.eta_minutes }} min</span>
+            {% endif %}
+          </div>
+        </div>
+        <span class="text-muted">Quota resets at {{ website_eta.quota_reset_at[:16] }} ET</span>
+      </section>
+      {% endif %}
       <a class="panel-button panel-button-ghost" href="/ui/websites/{{ website.id }}/urls">View URL drill-down</a>
     </li>
   </ul>

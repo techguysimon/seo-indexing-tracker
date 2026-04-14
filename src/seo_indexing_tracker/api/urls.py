@@ -45,6 +45,7 @@ def _normalize_url_for_comparison(url: str) -> str:
 class WebsiteURLListItem(BaseModel):
     """Website URL listing record with latest inspection summary."""
 
+    id: UUID
     url: str
     latest_index_status: URLIndexStatus
     last_checked_at: datetime | None
@@ -151,6 +152,7 @@ async def fetch_website_urls(
 
     listing_statement = (
         select(
+            URL.id,
             URL.url,
             URL.latest_index_status,
             URL.last_checked_at,
@@ -182,6 +184,7 @@ async def fetch_website_urls(
     rows = await session.execute(listing_statement)
     items = [
         WebsiteURLListItem(
+            id=row.id,
             url=row.url,
             latest_index_status=row.latest_index_status,
             last_checked_at=row.last_checked_at,
