@@ -23,13 +23,19 @@ from seo_indexing_tracker.models import (
     URL,
     Website,
 )
+from seo_indexing_tracker.utils.batch_helpers import (
+    derive_final_status,
+    inspection_shows_indexed,
+    submission_status_from_result,
+)
+from seo_indexing_tracker.utils.job_helpers import (
+    build_index_status_row,
+    is_transient_quota_error_code,
+)
+from seo_indexing_tracker.utils.sequence_helpers import chunk_sequence
+from seo_indexing_tracker.utils.shared_helpers import extract_index_status_result
 from seo_indexing_tracker.utils.index_status import (
     derive_url_index_status_from_coverage_state,
-)
-from seo_indexing_tracker.utils.shared_helpers import (
-    extract_index_status_result,
-    optional_text,
-    parse_verdict,
 )
 from seo_indexing_tracker.services.google_indexing_client import (
     BatchSubmitResult,
@@ -284,7 +290,7 @@ class BatchProcessorService:
             inspection_results_by_url: dict[UUID, IndexStatusResult] = {}
             inspected_count = 0
 
-            for inspect_batch in self._chunk_urls(
+            for inspect_batch in chunk_sequence(
                 queued_urls, self._inspection_batch_size
             ):
                 batch_inspection_results = await self._inspect_url_batch(
@@ -323,7 +329,7 @@ class BatchProcessorService:
                 )
 
             if any(
-                self._is_transient_quota_error_code(record.result.error_code)
+                is_transient_quota_error_code(record.result.error_code)
                 for record in inspection_records
             ):
                 await self._mark_website_internal_rate_limited(website_id)
@@ -344,7 +350,7 @@ class BatchProcessorService:
                 )
 
                 # Check if URL is already indexed based on fresh inspection result
-                is_indexed = self._inspection_shows_indexed(url_inspection_result)
+                is_indexed = inspection_shows_indexed(url_inspection_result)
 
                 # User override: always submit if manual_priority_override is set
                 if queued_url.manual_priority_override is not None:
@@ -392,7 +398,7 @@ class BatchProcessorService:
                 eligible_for_submission.append(queued_url)
 
             # Submit only the filtered URLs that need it
-            for url_batch in self._chunk_urls(
+            for url_batch in chunk_sequence(
                 eligible_for_submission, self._submit_batch_size
             ):
                 batch_results, batch_logs = await self._submit_url_batch(
@@ -462,7 +468,7 @@ class BatchProcessorService:
             ]
             inspection_success_count = self._inspection_success_count(final_outcomes)
 
-            status = self._derive_final_status(final_outcomes)
+            status = BatchProcessorStatus(derive_final_status(final_outcomes))
             await self._emit_progress(
                 callback=progress_callback,
                 website_id=website_id,
@@ -611,7 +617,7 @@ class BatchProcessorService:
                 _SubmissionLogRecord(
                     url_id=url.id,
                     api_response=asdict(submission_result),
-                    status=self._submission_status_from_result(submission_result),
+                    status=submission_status_from_result(submission_result),
                     error_message=submission_result.error_message,
                 )
             )
@@ -762,7 +768,7 @@ class BatchProcessorService:
                 url = url_by_id.get(record.url_id)
                 if url is None:
                     continue
-                if self._is_transient_quota_error_code(record.result.error_code):
+                if is_transient_quota_error_code(record.result.error_code):
                     # Preserve last known denormalized status when inspection fails transiently.
                     continue
                 coverage_state = record.result.coverage_state or "INSPECTION_FAILED"
@@ -771,10 +777,6 @@ class BatchProcessorService:
                 )
                 url.latest_index_status = derived_status
                 url.last_checked_at = checked_at
-
-    @staticmethod
-    def _is_transient_quota_error_code(error_code: str | None) -> bool:
-        return error_code in {"RATE_LIMITED", "QUOTA_EXCEEDED"}
 
     def _index_status_row(
         self,
@@ -786,31 +788,11 @@ class BatchProcessorService:
         raw_response = result.raw_response or {}
         index_status_result = extract_index_status_result(raw_response)
 
-        return {
-            "url_id": record.url_id,
-            "coverage_state": result.coverage_state or "INSPECTION_FAILED",
-            "verdict": parse_verdict(result.verdict),
-            "last_crawl_time": result.last_crawl_time,
-            "indexed_at": result.last_crawl_time,
-            "checked_at": checked_at,
-            "robots_txt_state": result.robots_txt_state,
-            "indexing_state": result.indexing_state,
-            "page_fetch_state": optional_text(
-                index_status_result.get("pageFetchState")
-            ),
-            "google_canonical": optional_text(
-                index_status_result.get("googleCanonical")
-            ),
-            "user_canonical": optional_text(index_status_result.get("userCanonical")),
-            "raw_response": (
-                raw_response
-                if raw_response
-                else {
-                    "error_code": result.error_code,
-                    "error_message": result.error_message,
-                }
-            ),
-        }
+        return build_index_status_row(
+            url_id=record.url_id,
+            result=result,
+            index_status_result=index_status_result,
+        )
 
     async def _get_website_or_raise(self, website_id: UUID) -> Website:
         async with self._session_factory() as session:
@@ -977,14 +959,6 @@ class BatchProcessorService:
         )
 
     @staticmethod
-    def _submission_status_from_result(result: IndexingURLResult) -> SubmissionStatus:
-        if result.success:
-            return SubmissionStatus.SUCCESS
-        if result.error_code in {"QUOTA_EXCEEDED", "RATE_LIMITED"}:
-            return SubmissionStatus.RATE_LIMITED
-        return SubmissionStatus.FAILED
-
-    @staticmethod
     def _submission_success_count(outcomes: Sequence[URLBatchOutcome]) -> int:
         return sum(1 for outcome in outcomes if outcome.submission_success)
 
@@ -999,29 +973,6 @@ class BatchProcessorService:
             for outcome in outcomes
             if outcome.inspection_attempted and outcome.inspection_success
         )
-
-    @staticmethod
-    def _derive_final_status(
-        outcomes: Sequence[URLBatchOutcome],
-    ) -> BatchProcessorStatus:
-        if not outcomes:
-            return BatchProcessorStatus.COMPLETED
-
-        successful = [
-            outcome
-            for outcome in outcomes
-            if outcome.submission_skipped
-            or (
-                outcome.submission_success
-                and outcome.inspection_attempted
-                and outcome.inspection_success
-            )
-        ]
-        if len(successful) == len(outcomes):
-            return BatchProcessorStatus.COMPLETED
-        if successful:
-            return BatchProcessorStatus.PARTIAL_FAILURE
-        return BatchProcessorStatus.FAILED
 
     @staticmethod
     def _default_acquire_timeout_seconds() -> float:
@@ -1094,13 +1045,6 @@ class BatchProcessorService:
                 },
             )
 
-    @staticmethod
-    def _chunk_urls(urls: Sequence[URL], chunk_size: int) -> list[list[URL]]:
-        return [
-            list(urls[index : index + chunk_size])
-            for index in range(0, len(urls), chunk_size)
-        ]
-
     async def _latest_index_statuses_by_url_ids(
         self,
         *,
@@ -1134,28 +1078,6 @@ class BatchProcessorService:
             latest_statuses = statuses_result.scalars().all()
 
         return {status.url_id: status for status in latest_statuses}
-
-    @staticmethod
-    def _is_already_indexed(index_status: IndexStatus | None) -> bool:
-        if index_status is None:
-            return False
-
-        return index_status.coverage_state.strip().casefold() == "indexed"
-
-    @staticmethod
-    def _inspection_shows_indexed(result: IndexStatusResult | None) -> bool:
-        """Check if inspection result indicates URL is already indexed."""
-        if result is None:
-            return False
-        coverage_state = result.coverage_state
-        if not coverage_state:
-            return False
-
-        # Use the same logic as derive_url_index_status_from_coverage_state
-        from seo_indexing_tracker.models.url import URLIndexStatus
-
-        derived = derive_url_index_status_from_coverage_state(coverage_state)
-        return derived == URLIndexStatus.INDEXED
 
     async def _emit_progress(
         self,
