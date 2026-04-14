@@ -15,21 +15,21 @@
         <div class="w-2 h-2 rounded-full bg-primary"></div>
         <span class="font-headline text-sm font-semibold">Submission</span>
       </div>
-      <span class="font-label text-xs text-slate-500 font-bold">{{ next_scheduled_runs.url_submission }}</span>
+      <span class="font-label text-xs text-slate-500 font-bold truncate max-w-[140px]">{{ next_scheduled_runs.url_submission }}</span>
     </div>
     <div class="flex justify-between items-center p-4 bg-surface-container-low rounded-lg">
       <div class="flex items-center gap-4">
         <div class="w-2 h-2 rounded-full bg-primary"></div>
         <span class="font-headline text-sm font-semibold">Verification</span>
       </div>
-      <span class="font-label text-xs text-slate-500 font-bold">{{ next_scheduled_runs.index_verification }}</span>
+      <span class="font-label text-xs text-slate-500 font-bold truncate max-w-[140px]">{{ next_scheduled_runs.index_verification }}</span>
     </div>
     <div class="flex justify-between items-center p-4 bg-surface-container-low rounded-lg">
       <div class="flex items-center gap-4">
         <div class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></div>
         <span class="font-headline text-sm font-semibold">Sitemap</span>
       </div>
-      <span class="font-label text-xs text-tertiary font-bold">{{ next_scheduled_runs.sitemap_refresh }}</span>
+      <span class="font-label text-xs text-tertiary font-bold truncate max-w-[140px]">{{ next_scheduled_runs.sitemap_refresh }}</span>
     </div>
 
     {% if running_jobs %}
@@ -44,7 +44,7 @@
             <p class="text-[11px] text-slate-400">{{ job.urls_processed }} URLs processed</p>
           </div>
         </div>
-        <span class="font-label text-xs text-slate-500 font-bold">{{ job.job_id }}</span>
+        <span class="font-label text-xs text-slate-500 font-bold truncate max-w-[120px]">{{ job.job_id }}</span>
       </div>
       {% endfor %}
     </div>

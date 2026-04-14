@@ -124,7 +124,7 @@
           <td class="py-4 px-4">
             {% if item.last_submitted_at %}
             <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-secondary-container text-on-secondary-container">Submitted</span>
-            <small class="block text-xs text-on-surface-variant mt-0.5">{{ item.last_submitted_at.strftime('%Y-%m-%d %H:%M') }}</small>
+            <small class="block text-xs text-on-surface-variant mt-0.5">{{ item.last_submitted_at | datetime_us }}</small>
             {% else %}
             <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-surface-container-high text-on-surface-variant">Not submitted</span>
             {% endif %}

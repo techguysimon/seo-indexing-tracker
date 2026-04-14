@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
+
 from fastapi import Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +16,34 @@ from seo_indexing_tracker.services.processing_pipeline import (
     SITEMAP_REFRESH_JOB_ID,
     URL_SUBMISSION_JOB_ID,
 )
+
+
+def _format_next_run_time(next_run: datetime | None) -> str:
+    """Format a next_run_time as relative time or US date."""
+    if next_run is None:
+        return "Paused"
+
+    now = datetime.now(UTC)
+    if next_run.tzinfo is None:
+        next_run = next_run.replace(tzinfo=UTC)
+
+    eastern_tz = ZoneInfo("America/New_York")
+    now_eastern = now.astimezone(eastern_tz)
+    value_eastern = next_run.astimezone(eastern_tz)
+    delta = value_eastern - now_eastern
+
+    if delta < timedelta(0):
+        return "overdue"
+    if delta < timedelta(minutes=1):
+        return "in <1m"
+    if delta < timedelta(hours=1):
+        minutes = int(delta.total_seconds() / 60)
+        return f"in {minutes}m"
+    if delta < timedelta(days=1):
+        hours = int(delta.total_seconds() / 3600)
+        return f"in {hours}h"
+
+    return value_eastern.strftime("%-m-%-d %-I:%M %p")
 
 
 def _format_next_run_by_job(request: Request) -> dict[str, str]:
@@ -34,7 +65,7 @@ def _format_next_run_by_job(request: Request) -> dict[str, str]:
         }
 
     next_run_by_job_id = {
-        job.job_id: job.next_run_time.isoformat() if job.next_run_time else "Paused"
+        job.job_id: _format_next_run_time(job.next_run_time)
         for job in scheduler_jobs
     }
     return {

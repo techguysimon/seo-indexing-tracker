@@ -60,6 +60,20 @@ __all__ = ["app", "create_app", "main"]
 _lifecycle_logger = logging.getLogger("seo_indexing_tracker.lifecycle")
 
 
+def _datetime_us(value: datetime | None) -> str:
+    """Format a datetime as US-style: 4-13-2026 1:58 PM (Eastern)."""
+    if value is None:
+        return "Never"
+
+    from zoneinfo import ZoneInfo
+
+    eastern_tz = ZoneInfo("America/New_York")
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    value_eastern = value.astimezone(eastern_tz)
+    return value_eastern.strftime("%-m-%-d-%Y %-I:%M %p")
+
+
 def _datetime_relative(value: datetime | None) -> str:
     """Format a datetime as a human-readable relative time string."""
     if value is None:
@@ -289,7 +303,9 @@ def create_app() -> FastAPI:
             lambda request: {"settings": request.app.state.settings},
         ],
     )
+    templates.env.filters["datetime_us"] = _datetime_us
     templates.env.filters["datetime_relative"] = _datetime_relative
+    templates.env.filters["humanize_date"] = _datetime_relative
 
     app = FastAPI(title="SEO Indexing Tracker", lifespan=lifespan)
     _initialize_lifecycle_state(app)
