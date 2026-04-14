@@ -12,6 +12,9 @@ __pycache__/
 venv/
 .python-version
 
+data/*.log
+data/*.log.*
+data/backups/
 data/*.db
 data/*.db-shm
 data/*.db-wal
