@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import RedirectResponse
 from starlette.types import ASGIApp
 
 from seo_indexing_tracker.services.auth_service import AuthService
@@ -20,7 +20,6 @@ PUBLIC_PATHS = {
     "/auth/callback",
     "/access-denied",
     "/health",
-    "/static",
 }
 
 
@@ -35,25 +34,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        # Skip auth for public paths
         path = request.url.path
+
         if path in PUBLIC_PATHS or path.startswith("/static"):
             request.state.current_user = None
             return await call_next(request)
 
-        # Extract JWT from cookie
         token = request.cookies.get("auth_token")
         if not token:
-            request.state.current_user = None
-            return await call_next(request)
+            if request.headers.get("HX-Request"):
+                return Response(status_code=401, content="Not authenticated")
+            return RedirectResponse(url="/access-denied", status_code=302)
 
-        # Decode and validate JWT
         payload = AuthService.decode_jwt(token, self._jwt_secret)
         if payload is None:
-            request.state.current_user = None
-            return await call_next(request)
+            if request.headers.get("HX-Request"):
+                return Response(status_code=401, content="Not authenticated")
+            return RedirectResponse(url="/access-denied", status_code=302)
 
-        # Set user info on request.state
         from seo_indexing_tracker.schemas.auth import UserInfo
 
         user_info = UserInfo(

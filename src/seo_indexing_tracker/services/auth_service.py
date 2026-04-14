@@ -11,7 +11,7 @@ from jose import JWTError, jwt
 from pydantic import SecretStr
 
 from seo_indexing_tracker.config import get_settings
-from seo_indexing_tracker.schemas.auth import OAuthCallbackResult, UserInfo
+from seo_indexing_tracker.schemas.auth import OAuthCallbackResult
 
 logger = logging.getLogger("seo_indexing_tracker.auth")
 
@@ -20,7 +20,6 @@ class AuthService:
     """Handles Google OAuth, JWT tokens, and email role resolution."""
 
     _instance: AuthService | None = None
-    _oauth: OAuth | None = None
 
     def __init__(self) -> None:
         settings = get_settings()
@@ -30,6 +29,8 @@ class AuthService:
         self._guest_emails = settings.guest_email_list
         self._jwt_secret = self._get_or_create_jwt_secret(settings.JWT_SECRET_KEY)
         self._jwt_expiry_hours = settings.JWT_EXPIRY_HOURS
+        self._oauth_client: OAuth | None = None
+        self._oauth_initialized: bool = False
 
     @staticmethod
     def _get_or_create_jwt_secret(secret: SecretStr) -> str:
@@ -48,47 +49,37 @@ class AuthService:
             cls._instance = cls()
         return cls._instance
 
-    # ── Google OAuth ────────────────────────────────────────────────────────
+    def _get_oauth_client(self) -> OAuth:
+        if self._oauth_client is None:
+            self._oauth_client = OAuth()
+            self._oauth_client.register(
+                name="google",
+                client_id=self._google_client_id,
+                client_secret=self._google_client_secret,
+                server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+                client_kwargs={"scope": "openid email profile"},
+            )
+            self._oauth_initialized = True
+        return self._oauth_client
 
     def get_google_authorization_url(self, request) -> str:
-        """Build Google OAuth authorization URL with PKCE."""
-        from starlette.config import environ
-
-        environ["GOOGLE_CLIENT_ID"] = self._google_client_id
-        environ["GOOGLE_CLIENT_SECRET"] = self._google_client_secret
-
-        oauth = OAuth()
-        oauth.register(
-            name="google",
-            client_id=self._google_client_id,
-            client_secret=self._google_client_secret,
-            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-            client_kwargs={"scope": "openid email profile"},
-        )
+        oauth = self._get_oauth_client()
         redirect_uri = str(request.url_for("auth_callback"))
-        return oauth.google.create_authorization_url(redirect_uri)[0]
+        try:
+            result = oauth.google.create_authorization_url(redirect_uri)
+            if isinstance(result, tuple):
+                return result[0]
+            return result.get("url", "")
+        except Exception as e:
+            logger.error("Failed to create Google authorization URL: %s", e)
+            raise
 
     async def fetch_google_user_info(self, code: str, request) -> dict:
-        """Exchange code for tokens, return user info dict."""
-        from starlette.config import environ
-
-        environ["GOOGLE_CLIENT_ID"] = self._google_client_id
-        environ["GOOGLE_CLIENT_SECRET"] = self._google_client_secret
-
-        oauth = OAuth()
-        oauth.register(
-            name="google",
-            client_id=self._google_client_id,
-            client_secret=self._google_client_secret,
-            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-            client_kwargs={"scope": "openid email profile"},
-        )
+        oauth = self._get_oauth_client()
         redirect_uri = str(request.url_for("auth_callback"))
         token = await oauth.google.fetch_token(redirect_uri, code=code)
         user_info = await oauth.google.get("userinfo", token=token)
         return user_info.json()
-
-    # ── JWT ─────────────────────────────────────────────────────────────────
 
     def create_jwt(self, email: str, role: str) -> str:
         """Create JWT with email + role, signed with JWT_SECRET."""
@@ -108,8 +99,6 @@ class AuthService:
             return jwt.decode(token, secret, algorithms=["HS256"])
         except JWTError:
             return None
-
-    # ── Role resolution ─────────────────────────────────────────────────────
 
     def resolve_role(self, email: str) -> str:
         """Resolve email to role: admin > guest > stranger."""
