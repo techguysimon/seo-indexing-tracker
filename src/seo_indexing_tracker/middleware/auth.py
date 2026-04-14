@@ -44,13 +44,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not token:
             if request.headers.get("HX-Request"):
                 return Response(status_code=401, content="Not authenticated")
-            return RedirectResponse(url="/access-denied", status_code=302)
+            return RedirectResponse(url="/login", status_code=302)
 
         payload = AuthService.decode_jwt(token, self._jwt_secret)
         if payload is None:
             if request.headers.get("HX-Request"):
                 return Response(status_code=401, content="Not authenticated")
-            return RedirectResponse(url="/access-denied", status_code=302)
+            return RedirectResponse(url="/login", status_code=302)
 
         from seo_indexing_tracker.schemas.auth import UserInfo
 
