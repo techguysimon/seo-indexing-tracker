@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import secrets
 import time
+from urllib.parse import urlencode
 
-from authlib.integrations.starlette_client import OAuth
+import httpx
 from jose import JWTError, jwt
 from pydantic import SecretStr
 
@@ -18,6 +19,9 @@ logger = logging.getLogger("seo_indexing_tracker.auth")
 _GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 _GOOGLE_USERINFO_ENDPOINT = "https://www.googleapis.com/oauth2/v3/userinfo"
+_GOOGLE_DISCOVERY_ENDPOINT = (
+    "https://accounts.google.com/.well-known/openid-configuration"
+)
 
 
 class AuthService:
@@ -33,8 +37,6 @@ class AuthService:
         self._guest_emails = settings.guest_email_list
         self._jwt_secret = self._get_or_create_jwt_secret(settings.JWT_SECRET_KEY)
         self._jwt_expiry_hours = settings.JWT_EXPIRY_HOURS
-        self._oauth_client: OAuth | None = None
-        self._oauth_initialized: bool = False
 
         if self._google_client_id and self._google_client_secret:
             logger.info("Google OAuth configured (client_id set)")
@@ -60,40 +62,53 @@ class AuthService:
             cls._instance = cls()
         return cls._instance
 
-    def _get_oauth_client(self) -> OAuth:
-        if self._oauth_client is None:
-            self._oauth_client = OAuth()
-            self._oauth_client.register(
-                name="google",
-                client_id=self._google_client_id,
-                client_secret=self._google_client_secret,
-                authorize_url=_GOOGLE_AUTH_ENDPOINT,
-                token_endpoint=_GOOGLE_TOKEN_ENDPOINT,
-                client_kwargs={"scope": "openid email profile"},
-            )
-            self._oauth_initialized = True
-        return self._oauth_client
+    # ── Google OAuth ────────────────────────────────────────────────────────
 
-    async def get_google_authorization_url(self, request) -> str:
-        oauth = self._get_oauth_client()
+    def build_authorization_url(self, request) -> str:
+        """Build Google OAuth authorization URL manually."""
         redirect_uri = str(request.url_for("auth_callback"))
-        try:
-            result = await oauth.google.create_authorization_url(redirect_uri)
-            if isinstance(result, tuple):
-                return result[0]
-            return result.get("url", "")
-        except Exception as e:
-            logger.error("Failed to create Google authorization URL: %s", e)
-            raise
+        params = {
+            "client_id": self._google_client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "openid email profile",
+            "access_type": "offline",
+            "prompt": "consent",
+        }
+        return f"{_GOOGLE_AUTH_ENDPOINT}?{urlencode(params)}"
 
     async def fetch_google_user_info(self, code: str, request) -> dict:
-        oauth = self._get_oauth_client()
+        """Exchange code for tokens and return user info dict."""
         redirect_uri = str(request.url_for("auth_callback"))
-        token = await oauth.google.fetch_token(redirect_uri, code=code)
-        resp = await oauth.google.get(_GOOGLE_USERINFO_ENDPOINT, token=token)
-        data = resp.json()
-        logger.info("Google userinfo response: %s", data)
-        return data
+
+        async with httpx.AsyncClient() as client:
+            # Exchange code for tokens
+            token_resp = await client.post(
+                _GOOGLE_TOKEN_ENDPOINT,
+                data={
+                    "code": code,
+                    "client_id": self._google_client_id,
+                    "client_secret": self._google_client_secret,
+                    "redirect_uri": redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+            )
+            token_resp.raise_for_status()
+            token_data = token_resp.json()
+            logger.info("Token response: %s", list(token_data.keys()))
+
+            access_token = token_data.get("access_token", "")
+            id_token = token_data.get("id_token", "")
+
+            # Fetch userinfo
+            userinfo_resp = await client.get(
+                _GOOGLE_USERINFO_ENDPOINT,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            userinfo_resp.raise_for_status()
+            return userinfo_resp.json()
+
+    # ── JWT ─────────────────────────────────────────────────────────────────
 
     def create_jwt(self, email: str, role: str) -> str:
         """Create JWT with email + role, signed with JWT_SECRET."""
@@ -113,6 +128,8 @@ class AuthService:
             return jwt.decode(token, secret, algorithms=["HS256"])
         except JWTError:
             return None
+
+    # ── Role resolution ─────────────────────────────────────────────────────
 
     def resolve_role(self, email: str) -> str:
         """Resolve email to role: admin > guest > stranger."""
