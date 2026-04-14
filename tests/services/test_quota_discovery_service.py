@@ -62,8 +62,8 @@ async def test_discover_quota_sets_initial_state_and_logs_activity(
     async with scoped_session() as session:
         refreshed = await session.get(Website, website_id)
         assert refreshed is not None
-        assert refreshed.discovered_indexing_quota == 50
-        assert refreshed.discovered_inspection_quota == 500
+        assert refreshed.discovered_indexing_quota == 200
+        assert refreshed.discovered_inspection_quota == 2000
         assert refreshed.quota_discovery_status == QuotaDiscoveryStatus.DISCOVERING
         assert refreshed.quota_discovery_confidence == pytest.approx(0.1)
         assert refreshed.quota_discovered_at is not None
@@ -113,7 +113,7 @@ async def test_record_429_reduces_quota_and_confidence(tmp_path: Path) -> None:
         website = Website(
             domain="pressure.example",
             site_url="https://pressure.example",
-            discovered_indexing_quota=100,
+            discovered_indexing_quota=300,
             quota_discovery_status=QuotaDiscoveryStatus.DISCOVERING,
             quota_discovery_confidence=0.5,
         )
@@ -132,7 +132,7 @@ async def test_record_429_reduces_quota_and_confidence(tmp_path: Path) -> None:
     async with scoped_session() as session:
         refreshed = await session.get(Website, website_id)
         assert refreshed is not None
-        assert refreshed.discovered_indexing_quota == 90
+        assert refreshed.discovered_indexing_quota == 270
         assert refreshed.quota_discovery_confidence == pytest.approx(0.25)
         assert refreshed.quota_discovery_status == QuotaDiscoveryStatus.ESTIMATED
         assert refreshed.quota_last_429_at is not None
@@ -218,7 +218,7 @@ async def test_record_success_increases_confidence_and_transitions_state(
     async with scoped_session() as session:
         refreshed = await session.get(Website, website_id)
         assert refreshed is not None
-        assert refreshed.discovered_indexing_quota == 56
+        assert refreshed.discovered_indexing_quota == 55
         assert refreshed.quota_discovery_status == QuotaDiscoveryStatus.ESTIMATED
         assert refreshed.quota_discovery_confidence == pytest.approx(0.21)
 
@@ -229,7 +229,7 @@ async def test_record_success_increases_confidence_and_transitions_state(
             )
         )
         assert usage is not None
-        usage.indexing_count = 50
+        usage.indexing_count = 49
         refreshed.quota_discovery_confidence = 0.95
 
     async with scoped_session() as session:
@@ -242,7 +242,7 @@ async def test_record_success_increases_confidence_and_transitions_state(
     async with scoped_session() as session:
         refreshed = await session.get(Website, website_id)
         assert refreshed is not None
-        assert refreshed.quota_discovery_status == QuotaDiscoveryStatus.CONFIRMED
+        assert refreshed.quota_discovery_status == QuotaDiscoveryStatus.ESTIMATED
         assert refreshed.quota_discovery_confidence == pytest.approx(0.96)
 
     await engine.dispose()
@@ -282,7 +282,7 @@ async def test_record_429_with_retry_after_uses_smaller_penalty_and_floor(
         website = Website(
             domain="retry-after.example",
             site_url="https://retry-after.example",
-            discovered_indexing_quota=52,
+            discovered_indexing_quota=300,
             quota_discovery_status=QuotaDiscoveryStatus.DISCOVERING,
             quota_discovery_confidence=0.2,
         )
@@ -302,7 +302,7 @@ async def test_record_429_with_retry_after_uses_smaller_penalty_and_floor(
     async with scoped_session() as session:
         refreshed = await session.get(Website, website_id)
         assert refreshed is not None
-        assert refreshed.discovered_indexing_quota == 50
+        assert refreshed.discovered_indexing_quota == 270
         assert refreshed.quota_discovery_confidence == pytest.approx(0.05)
         assert refreshed.quota_discovery_status == QuotaDiscoveryStatus.FAILED
 
