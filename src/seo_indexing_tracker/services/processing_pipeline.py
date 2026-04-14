@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 import logging
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from time import perf_counter
 from typing import Any, Protocol, cast
 from uuid import UUID
 
@@ -19,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from seo_indexing_tracker.config import Settings
 from seo_indexing_tracker.database import session_scope
 from seo_indexing_tracker.models import (
-    JobExecution,
     IndexStatus,
     ServiceAccount,
     Sitemap,
@@ -37,6 +32,11 @@ from seo_indexing_tracker.services.google_url_inspection_client import (
     IndexStatusResult,
     InspectionSystemStatus,
 )
+from seo_indexing_tracker.services.job_runner import (
+    JobExecutionMetrics,
+    JobRunResult,
+    JobRunnerService,
+)
 from seo_indexing_tracker.services.priority_queue import PriorityQueueService
 from seo_indexing_tracker.services.quota_service import (
     DailyQuotaExceededError,
@@ -53,7 +53,10 @@ from seo_indexing_tracker.services.url_discovery import URLDiscoveryService
 from seo_indexing_tracker.utils.index_status import (
     derive_url_index_status_from_coverage_state,
 )
-from seo_indexing_tracker.utils.shared_helpers import parse_verdict
+from seo_indexing_tracker.utils.job_helpers import (
+    build_index_status_row,
+    is_transient_quota_error_code,
+)
 
 _job_logger = logging.getLogger("seo_indexing_tracker.scheduler.jobs")
 
@@ -63,32 +66,6 @@ URL_SUBMISSION_JOB_ID = "url-submission-job"
 INDEX_VERIFICATION_JOB_ID = "index-verification-job"
 SITEMAP_REFRESH_JOB_ID = "sitemap-refresh-job"
 DEFAULT_RATE_LIMIT_ACQUIRE_TIMEOUT_SECONDS = 10.0
-
-
-@dataclass(slots=True)
-class JobExecutionMetrics:
-    """In-memory runtime metrics for one scheduled job."""
-
-    job_id: str
-    name: str
-    total_runs: int = 0
-    successful_runs: int = 0
-    failed_runs: int = 0
-    overlap_skips: int = 0
-    running: bool = False
-    last_started_at: datetime | None = None
-    last_finished_at: datetime | None = None
-    last_duration_ms: float | None = None
-    last_error: str | None = None
-
-
-@dataclass(slots=True, frozen=True)
-class JobRunResult:
-    """Normalized result metadata persisted to job execution history."""
-
-    summary: dict[str, int]
-    urls_processed: int
-    checkpoint_data: dict[str, Any] | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -144,229 +121,6 @@ class _MappedGoogleClientFactory:
         return client_bundle
 
 
-class _OverlapProtectedRunner:
-    """Execute jobs with overlap protection and per-job metrics."""
-
-    def __init__(self) -> None:
-        self._locks: dict[str, asyncio.Lock] = {}
-        self._metrics: dict[str, JobExecutionMetrics] = {}
-        self._activity_service = ActivityService()
-
-    def register(self, *, job_id: str, name: str) -> None:
-        self._locks.setdefault(job_id, asyncio.Lock())
-        self._metrics.setdefault(job_id, JobExecutionMetrics(job_id=job_id, name=name))
-
-    def snapshot(self) -> list[JobExecutionMetrics]:
-        return [
-            JobExecutionMetrics(
-                job_id=metrics.job_id,
-                name=metrics.name,
-                total_runs=metrics.total_runs,
-                successful_runs=metrics.successful_runs,
-                failed_runs=metrics.failed_runs,
-                overlap_skips=metrics.overlap_skips,
-                running=metrics.running,
-                last_started_at=metrics.last_started_at,
-                last_finished_at=metrics.last_finished_at,
-                last_duration_ms=metrics.last_duration_ms,
-                last_error=metrics.last_error,
-            )
-            for metrics in self._metrics.values()
-        ]
-
-    async def run(
-        self,
-        *,
-        job_id: str,
-        run: Callable[[UUID], Awaitable[JobRunResult]],
-    ) -> None:
-        lock = self._locks[job_id]
-        metrics = self._metrics[job_id]
-        if lock.locked():
-            metrics.overlap_skips += 1
-            _job_logger.warning(
-                "scheduler_job_overlap_skipped", extra={"job_id": job_id}
-            )
-            return
-
-        async with lock:
-            metrics.total_runs += 1
-            metrics.running = True
-            metrics.last_started_at = datetime.now(UTC)
-            started_at = perf_counter()
-            execution_id = await self._start_job_execution(
-                job_id=job_id, metrics=metrics
-            )
-
-            try:
-                job_result = await self._invoke_job_run(
-                    run=run,
-                    execution_id=execution_id,
-                )
-                metrics.successful_runs += 1
-                metrics.last_error = None
-                _job_logger.info(
-                    "scheduler_pipeline_job_completed",
-                    extra={"job_id": job_id, **job_result.summary},
-                )
-                await self._finish_job_execution(
-                    execution_id=execution_id,
-                    status="success",
-                    urls_processed=job_result.urls_processed,
-                    checkpoint_data=job_result.checkpoint_data,
-                    error_message=None,
-                )
-            except Exception as error:
-                metrics.failed_runs += 1
-                metrics.last_error = str(error)
-                _job_logger.exception(
-                    "scheduler_pipeline_job_failed",
-                    extra={"job_id": job_id},
-                )
-                await self._finish_job_execution(
-                    execution_id=execution_id,
-                    status="failed",
-                    urls_processed=None,
-                    checkpoint_data=None,
-                    error_message=str(error),
-                )
-            except asyncio.CancelledError:
-                # Job was cancelled (e.g., timeout, scheduler shutdown, or removed).
-                # Mark as failed rather than crashing.
-                metrics.failed_runs += 1
-                metrics.last_error = "Job cancelled"
-                _job_logger.warning(
-                    "scheduler_pipeline_job_cancelled",
-                    extra={"job_id": job_id},
-                )
-                await self._finish_job_execution(
-                    execution_id=execution_id,
-                    status="failed",
-                    urls_processed=None,
-                    checkpoint_data=None,
-                    error_message="Job cancelled (timeout or shutdown)",
-                )
-                # Re-raise to properly cancel the task
-                raise
-            finally:
-                metrics.running = False
-                metrics.last_finished_at = datetime.now(UTC)
-                metrics.last_duration_ms = round(
-                    (perf_counter() - started_at) * 1000, 2
-                )
-
-    async def _start_job_execution(
-        self,
-        *,
-        job_id: str,
-        metrics: JobExecutionMetrics,
-    ) -> UUID:
-        execution = JobExecution(
-            job_id=job_id,
-            job_name=metrics.name,
-            status="running",
-            checkpoint_data={"stage": "started", "job_id": job_id},
-        )
-        async with session_scope() as session:
-            session.add(execution)
-            await session.flush()
-            await self._activity_service.log_activity(
-                session=session,
-                event_type="job_started",
-                website_id=None,
-                resource_type="job",
-                resource_id=execution.id,
-                message=f"{metrics.name} started",
-                metadata={"job_id": job_id, "job_execution_id": str(execution.id)},
-            )
-            return execution.id
-
-    async def _finish_job_execution(
-        self,
-        *,
-        execution_id: UUID,
-        status: str,
-        urls_processed: int | None,
-        checkpoint_data: dict[str, Any] | None,
-        error_message: str | None,
-    ) -> None:
-        finished_at = datetime.now(UTC)
-        async with session_scope() as session:
-            execution = await session.get(JobExecution, execution_id)
-            if execution is None:
-                return
-            execution.status = status
-            execution.finished_at = finished_at
-            if urls_processed is not None:
-                execution.urls_processed = urls_processed
-            if checkpoint_data is not None:
-                execution.checkpoint_data = checkpoint_data
-            execution.error_message = error_message
-            await session.flush()
-            await self._activity_service.log_activity(
-                session=session,
-                event_type="job_completed",
-                website_id=execution.website_id,
-                resource_type="job",
-                resource_id=execution.id,
-                message=f"{execution.job_name} {status}",
-                metadata={
-                    "job_id": execution.job_id,
-                    "job_execution_id": str(execution.id),
-                    "status": status,
-                    "urls_processed": execution.urls_processed,
-                    "error_message": error_message,
-                },
-            )
-
-    async def persist_checkpoint(
-        self,
-        *,
-        execution_id: UUID,
-        checkpoint_data: dict[str, Any],
-        urls_processed: int,
-    ) -> None:
-        async with session_scope() as session:
-            execution = await session.get(JobExecution, execution_id)
-            if execution is None:
-                return
-            execution.checkpoint_data = checkpoint_data
-            execution.urls_processed = urls_processed
-
-    async def _invoke_job_run(
-        self,
-        *,
-        run: Callable[[UUID], Awaitable[JobRunResult]],
-        execution_id: UUID,
-    ) -> JobRunResult:
-        parameter_count: int | None = None
-        try:
-            parameter_count = len(inspect.signature(run).parameters)
-        except (TypeError, ValueError):
-            parameter_count = None
-
-        if parameter_count == 0:
-            async with asyncio.timeout(900):  # 15 minute timeout
-                legacy_result = await cast(Any, run)()
-            if isinstance(legacy_result, JobRunResult):
-                return legacy_result
-            if isinstance(legacy_result, dict):
-                urls_processed = int(
-                    legacy_result.get("dequeued_urls")
-                    or legacy_result.get("inspected_urls")
-                    or legacy_result.get("discovered_urls")
-                    or 0
-                )
-                return JobRunResult(
-                    summary=cast(dict[str, int], legacy_result),
-                    urls_processed=urls_processed,
-                )
-            raise RuntimeError("Legacy scheduler job returned unexpected payload")
-
-        async with asyncio.timeout(900):  # 15 minute timeout
-            return await run(execution_id)
-
-
 class SchedulerProcessingPipelineService:
     """Configure and run recurring scheduler jobs for processing pipeline work."""
 
@@ -395,7 +149,7 @@ class SchedulerProcessingPipelineService:
         )
         self._activity_service = ActivityService()
         self._cooldown_service = CooldownService(settings=settings)
-        self._runner = _OverlapProtectedRunner()
+        self._runner = JobRunnerService()
 
     def register_jobs(self) -> None:
         if not self._scheduler.enabled:
@@ -693,10 +447,10 @@ class SchedulerProcessingPipelineService:
                 )
                 if result.http_status == 429:
                     saw_google_429 = True
-                elif self._is_transient_quota_error_code(result.error_code):
+                elif is_transient_quota_error_code(result.error_code):
                     saw_internal_rate_limit = True
                 inspection_rows.append(
-                    self._index_status_row(url_id=candidate.url_id, result=result)
+                    build_index_status_row(url_id=candidate.url_id, result=result)
                 )
                 results_by_url_id[candidate.url_id] = result
                 inspected_urls += 1
@@ -726,7 +480,7 @@ class SchedulerProcessingPipelineService:
                     url = url_by_id.get(url_id)
                     if url is None:
                         continue
-                    if self._is_transient_quota_error_code(result.error_code):
+                    if is_transient_quota_error_code(result.error_code):
                         # Preserve denormalized URL status during transient quota/rate-limit outages.
                         continue
                     coverage_state = result.coverage_state or "INSPECTION_FAILED"
@@ -996,33 +750,6 @@ class SchedulerProcessingPipelineService:
 
             return await self._rate_limiter.acquire(website_id, api_type="inspection")
 
-    @staticmethod
-    def _is_transient_quota_error_code(error_code: str | None) -> bool:
-        return error_code in {"RATE_LIMITED", "QUOTA_EXCEEDED"}
-
-    @staticmethod
-    def _index_status_row(
-        *, url_id: UUID, result: IndexStatusResult
-    ) -> dict[str, object]:
-        return {
-            "url_id": url_id,
-            "coverage_state": result.coverage_state or "INSPECTION_FAILED",
-            "verdict": parse_verdict(result.verdict),
-            "last_crawl_time": result.last_crawl_time,
-            "indexed_at": result.last_crawl_time,
-            "checked_at": datetime.now(UTC),
-            "robots_txt_state": result.robots_txt_state,
-            "indexing_state": result.indexing_state,
-            "page_fetch_state": None,
-            "google_canonical": None,
-            "user_canonical": None,
-            "raw_response": result.raw_response
-            or {
-                "error_code": result.error_code,
-                "error_message": result.error_message,
-            },
-        }
-
     async def _list_active_sitemap_ids(self) -> list[UUID]:
         async with session_scope() as session:
             statement = (
@@ -1088,6 +815,8 @@ async def run_scheduled_sitemap_refresh_job() -> None:
 __all__ = [
     "INDEX_VERIFICATION_JOB_ID",
     "JobExecutionMetrics",
+    "JobRunResult",
+    "JobRunnerService",
     "SITEMAP_REFRESH_JOB_ID",
     "SchedulerProcessingPipelineService",
     "URL_SUBMISSION_JOB_ID",
