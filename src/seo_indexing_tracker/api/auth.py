@@ -79,11 +79,12 @@ async def auth_callback(request: Request) -> RedirectResponse:
         token = _auth_service.create_jwt(email, role)
 
         response = RedirectResponse(url=result.redirect_url, status_code=302)
+        is_https = request.url.scheme == "https"
         response.set_cookie(
             key="auth_token",
             value=token,
             httponly=True,
-            secure=True,
+            secure=is_https,
             samesite="lax",
             max_age=86400 * 7,
         )

@@ -104,12 +104,17 @@
               <span class="w-1 h-1 rounded-full bg-secondary"></span>
               {{ status_val }}
             </span>
-            {% elif status_val == 'ERROR' %}
+            {% elif status_val == 'NOT_INDEXED' %}
+            <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-tertiary-container text-on-tertiary-container inline-flex items-center gap-1">
+              <span class="w-1 h-1 rounded-full bg-tertiary"></span>
+              {{ status_val }}
+            </span>
+            {% elif status_val == 'ERROR' or status_val == 'BLOCKED' %}
             <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-error-container text-on-error-container inline-flex items-center gap-1">
               <span class="w-1 h-1 rounded-full bg-error"></span>
               {{ status_val }}
             </span>
-            {% elif status_val == 'BLOCKED' or status_val == 'SOFT_404' %}
+            {% elif status_val == 'SOFT_404' %}
             <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-tertiary-fixed text-on-tertiary-fixed-variant inline-flex items-center gap-1">
               <span class="w-1 h-1 rounded-full bg-tertiary"></span>
               {{ status_val }}

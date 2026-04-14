@@ -3,25 +3,113 @@
     <span class="material-symbols-outlined text-primary">bolt</span>
     Live Queue Status
   </h3>
+
+  <!-- Queue Depth -->
   <div class="space-y-4">
     <div class="bg-surface-container-lowest p-4 rounded-lg flex items-center justify-between">
       <div>
         <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">Queued Now</p>
         <h4 class="font-headline text-xl font-extrabold text-primary">{{ queued_count }}</h4>
       </div>
-      <div class="w-10 h-1 bg-primary rounded-full"></div>
-    </div>
-    <div class="bg-surface-container-lowest p-4 rounded-lg flex items-center justify-between">
-      <div>
-        <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">High Priority</p>
-        <h4 class="font-headline text-xl font-extrabold text-on-surface">{{ high_priority_count }}</h4>
+      <div class="text-right">
+        <p class="font-label text-[10px] font-bold text-slate-400 uppercase tracking-widest">Breakdown</p>
+        <p class="text-[11px] text-slate-500"><span class="font-semibold text-on-surface">{{ high_priority_count }}</span> high / <span class="font-semibold text-on-surface">{{ low_priority_count }}</span> low</p>
       </div>
-      <div class="w-10 h-1 bg-surface-dim rounded-full"></div>
+    </div>
+
+    <!-- Queue progress bar -->
+    {% if queued_count > 0 %}
+    {% set high_pct = ((high_priority_count / queued_count) * 100) | round(0) | int %}
+    <div class="flex h-2 w-full rounded-full overflow-hidden">
+      <div class="h-full bg-primary" style="width: {{ high_pct }}%"></div>
+      <div class="h-full bg-surface-container-high" style="width: {{ 100 - high_pct }}%"></div>
+    </div>
+    <div class="flex justify-between text-[10px] text-slate-400 font-label font-bold">
+      <span>High Priority</span>
+      <span>Low Priority</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Quota & Drain Info -->
+  {% if websites_eta %}
+  <div class="space-y-3">
+    <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">Pipeline Status</p>
+    {% for site in websites_eta %}
+    <div class="bg-surface-container-lowest p-4 rounded-lg space-y-3">
+      <p class="font-headline text-xs font-semibold text-on-surface truncate" title="{{ site.website_domain }}">{{ site.website_domain }}</p>
+
+      <!-- Submission queue -->
+      <div class="space-y-1">
+        <div class="flex justify-between items-center">
+          <span class="text-[11px] text-slate-500">Submission</span>
+          {% if site.submission_queue.eta_minutes is not none %}
+          <span class="font-label text-[10px] font-bold text-primary">
+            ~{{ site.submission_queue.eta_minutes }}m to drain
+          </span>
+          {% elif site.submission_queue.queued == 0 %}
+          <span class="font-label text-[10px] font-bold text-slate-400">Clear</span>
+          {% else %}
+          <span class="font-label text-[10px] font-bold text-tertiary">Quota exhausted</span>
+          {% endif %}
+        </div>
+        <div class="flex justify-between items-center text-[10px] text-slate-400">
+          <span>{{ site.submission_queue.queued }} queued</span>
+          <span>{{ site.submission_queue.quota_remaining }}/{{ site.submission_queue.quota_limit }} quota left</span>
+        </div>
+        {% if site.submission_queue.quota_limit > 0 %}
+        {% set sub_pct = (((site.submission_queue.quota_limit - site.submission_queue.quota_remaining) / site.submission_queue.quota_limit) * 100) | round(0) | int %}
+        <div class="h-1 w-full bg-surface-container-high rounded-full overflow-hidden">
+          <div class="h-full bg-gradient-to-r from-primary to-primary_container rounded-full" style="width: {{ sub_pct }}%"></div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Verification queue -->
+      <div class="space-y-1">
+        <div class="flex justify-between items-center">
+          <span class="text-[11px] text-slate-500">Verification</span>
+          {% if site.verification_queue.eta_minutes is not none %}
+          <span class="font-label text-[10px] font-bold text-tertiary">
+            ~{{ site.verification_queue.eta_minutes }}m to drain
+          </span>
+          {% elif site.verification_queue.queued == 0 %}
+          <span class="font-label text-[10px] font-bold text-slate-400">Clear</span>
+          {% else %}
+          <span class="font-label text-[10px] font-bold text-tertiary">Quota exhausted</span>
+          {% endif %}
+        </div>
+        <div class="flex justify-between items-center text-[10px] text-slate-400">
+          <span>{{ site.verification_queue.queued }} queued</span>
+          <span>{{ site.verification_queue.quota_remaining }}/{{ site.verification_queue.quota_limit }} quota left</span>
+        </div>
+        {% if site.verification_queue.quota_limit > 0 %}
+        {% set ver_pct = (((site.verification_queue.quota_limit - site.verification_queue.quota_remaining) / site.verification_queue.quota_limit) * 100) | round(0) | int %}
+        <div class="h-1 w-full bg-surface-container-high rounded-full overflow-hidden">
+          <div class="h-full bg-gradient-to-r from-tertiary to-tertiary_container rounded-full" style="width: {{ ver_pct }}%"></div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Quota Reset -->
+  {% if quota_reset_at %}
+  <div class="bg-primary/5 p-4 rounded-lg border border-primary/10">
+    <div class="flex items-center gap-2">
+      <span class="material-symbols-outlined text-primary text-sm">schedule</span>
+      <p class="text-[11px] leading-relaxed text-primary-container font-medium">
+        Quota resets at <strong class="font-bold">{{ quota_reset_at.strftime('%-I:%M %p UTC') }}</strong>
+      </p>
     </div>
   </div>
+  {% else %}
   <div class="bg-primary/5 p-4 rounded-lg border border-primary/10">
     <p class="text-[11px] leading-relaxed text-primary-container font-medium">
       Queue throughput is currently <strong class="font-bold">processing</strong>. High priority items are handled first.
     </p>
   </div>
+  {% endif %}
 </div>

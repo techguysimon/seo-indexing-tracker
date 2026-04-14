@@ -72,6 +72,11 @@
             <span class="w-1 h-1 rounded-full bg-secondary"></span>
             INDEXED
           </span>
+          {% elif status == 'NOT_INDEXED' %}
+          <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-tertiary-container text-on-tertiary-container inline-flex items-center gap-1">
+            <span class="w-1 h-1 rounded-full bg-tertiary"></span>
+            NOT INDEXED
+          </span>
           {% elif status == 'ERROR' or '404' in status %}
           <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-error-container text-on-error-container inline-flex items-center gap-1">
             <span class="w-1 h-1 rounded-full bg-error"></span>
@@ -82,10 +87,15 @@
             <span class="w-1 h-1 rounded-full bg-tertiary"></span>
             QUEUED
           </span>
+          {% elif status == 'UNCHECKED' %}
+          <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-surface-container-high text-on-surface-variant inline-flex items-center gap-1">
+            <span class="w-1 h-1 rounded-full bg-outline"></span>
+            UNCHECKED
+          </span>
           {% else %}
           <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-surface-container-high text-on-surface-variant inline-flex items-center gap-1">
             <span class="w-1 h-1 rounded-full bg-outline"></span>
-            NOT INDEXED
+            {{ status }}
           </span>
           {% endif %}
         </td>

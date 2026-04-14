@@ -9,6 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import RedirectResponse
 from starlette.types import ASGIApp
 
+from seo_indexing_tracker.config import get_settings
 from seo_indexing_tracker.services.auth_service import AuthService
 
 logger = logging.getLogger("seo_indexing_tracker.auth")
@@ -34,6 +35,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
+        settings = get_settings()
+        if not settings.is_auth_configured:
+            request.state.current_user = None
+            return await call_next(request)
+
         path = request.url.path
 
         if path in PUBLIC_PATHS or path.startswith("/static"):

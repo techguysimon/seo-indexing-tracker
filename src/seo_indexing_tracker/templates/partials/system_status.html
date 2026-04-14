@@ -9,48 +9,119 @@
     <span class="material-symbols-outlined text-primary">settings_suggest</span>
     <h3 class="font-headline text-lg font-bold text-on-surface">System Status</h3>
   </div>
-  <div class="space-y-6 flex-1">
+  <div class="space-y-4 flex-1">
+    <!-- Submission Job -->
+    {% set sub_running = namespace(found=false) %}
+    {% for job in running_jobs %}
+      {% if job.job_id == 'url-submission-job' %}
+        {% set sub_running.found = true %}
+      {% endif %}
+    {% endfor %}
     <div class="flex justify-between items-center p-4 bg-surface-container-low rounded-lg">
       <div class="flex items-center gap-4">
-        <div class="w-2 h-2 rounded-full bg-primary"></div>
-        <span class="font-headline text-sm font-semibold">Submission</span>
+        {% if sub_running.found %}
+        <div class="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></div>
+        {% elif last_completed_runs.get('url-submission-job') %}
+        <div class="w-2.5 h-2.5 rounded-full bg-tertiary"></div>
+        {% else %}
+        <div class="w-2.5 h-2.5 rounded-full bg-slate-300"></div>
+        {% endif %}
+        <div>
+          <span class="font-headline text-sm font-semibold">Submission</span>
+          {% if sub_running.found %}
+          <p class="text-[11px] text-primary font-medium">Running now</p>
+          {% elif last_completed_runs.get('url-submission-job') %}
+          <p class="text-[11px] text-slate-400">Last: {{ last_completed_runs['url-submission-job'].finished_at.strftime('%-I:%M %p') }} ({{ last_completed_runs['url-submission-job'].urls_processed }} URLs)</p>
+          {% else %}
+          <p class="text-[11px] text-slate-400">No runs yet</p>
+          {% endif %}
+        </div>
       </div>
       <span class="font-label text-xs text-slate-500 font-bold truncate max-w-[140px]">{{ next_scheduled_runs.url_submission }}</span>
     </div>
+
+    <!-- Verification Job -->
+    {% set ver_running = namespace(found=false) %}
+    {% for job in running_jobs %}
+      {% if job.job_id == 'index-verification-job' %}
+        {% set ver_running.found = true %}
+      {% endif %}
+    {% endfor %}
     <div class="flex justify-between items-center p-4 bg-surface-container-low rounded-lg">
       <div class="flex items-center gap-4">
-        <div class="w-2 h-2 rounded-full bg-primary"></div>
-        <span class="font-headline text-sm font-semibold">Verification</span>
+        {% if ver_running.found %}
+        <div class="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></div>
+        {% elif last_completed_runs.get('index-verification-job') %}
+        <div class="w-2.5 h-2.5 rounded-full bg-tertiary"></div>
+        {% else %}
+        <div class="w-2.5 h-2.5 rounded-full bg-slate-300"></div>
+        {% endif %}
+        <div>
+          <span class="font-headline text-sm font-semibold">Verification</span>
+          {% if ver_running.found %}
+          <p class="text-[11px] text-primary font-medium">Running now</p>
+          {% elif last_completed_runs.get('index-verification-job') %}
+          <p class="text-[11px] text-slate-400">Last: {{ last_completed_runs['index-verification-job'].finished_at.strftime('%-I:%M %p') }} ({{ last_completed_runs['index-verification-job'].urls_processed }} URLs)</p>
+          {% else %}
+          <p class="text-[11px] text-slate-400">No runs yet</p>
+          {% endif %}
+        </div>
       </div>
       <span class="font-label text-xs text-slate-500 font-bold truncate max-w-[140px]">{{ next_scheduled_runs.index_verification }}</span>
     </div>
+
+    <!-- Sitemap Job -->
+    {% set sit_running = namespace(found=false) %}
+    {% for job in running_jobs %}
+      {% if job.job_id == 'sitemap-refresh-job' %}
+        {% set sit_running.found = true %}
+      {% endif %}
+    {% endfor %}
     <div class="flex justify-between items-center p-4 bg-surface-container-low rounded-lg">
       <div class="flex items-center gap-4">
-        <div class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></div>
-        <span class="font-headline text-sm font-semibold">Sitemap</span>
+        {% if sit_running.found %}
+        <div class="w-2.5 h-2.5 rounded-full bg-tertiary animate-pulse"></div>
+        {% elif last_completed_runs.get('sitemap-refresh-job') %}
+        <div class="w-2.5 h-2.5 rounded-full bg-slate-300"></div>
+        {% else %}
+        <div class="w-2.5 h-2.5 rounded-full bg-slate-300"></div>
+        {% endif %}
+        <div>
+          <span class="font-headline text-sm font-semibold">Sitemap</span>
+          {% if sit_running.found %}
+          <p class="text-[11px] text-tertiary font-medium">Refreshing now</p>
+          {% elif last_completed_runs.get('sitemap-refresh-job') %}
+          <p class="text-[11px] text-slate-400">Last: {{ last_completed_runs['sitemap-refresh-job'].finished_at.strftime('%-I:%M %p') }}</p>
+          {% else %}
+          <p class="text-[11px] text-slate-400">No runs yet</p>
+          {% endif %}
+        </div>
       </div>
-      <span class="font-label text-xs text-tertiary font-bold truncate max-w-[140px]">{{ next_scheduled_runs.sitemap_refresh }}</span>
+      <span class="font-label text-xs text-slate-500 font-bold truncate max-w-[140px]">{{ next_scheduled_runs.sitemap_refresh }}</span>
     </div>
 
     {% if running_jobs %}
-    <div class="mt-4 space-y-4">
-      <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">Running Jobs</p>
+    <div class="mt-4 space-y-3">
+      <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">Active Jobs</p>
       {% for job in running_jobs %}
-      <div class="flex justify-between items-center p-4 bg-surface-container-low rounded-lg">
-        <div class="flex items-center gap-4">
+      <div class="flex justify-between items-center p-3 bg-primary/5 rounded-lg border border-primary/10">
+        <div class="flex items-center gap-3">
           <div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
           <div>
-            <span class="font-headline text-sm font-semibold">{{ job.job_name }}</span>
+            <span class="font-headline text-sm font-semibold text-primary">{{ job.job_name }}</span>
             <p class="text-[11px] text-slate-400">{{ job.urls_processed }} URLs processed</p>
           </div>
         </div>
-        <span class="font-label text-xs text-slate-500 font-bold truncate max-w-[120px]">{{ job.job_id }}</span>
       </div>
       {% endfor %}
     </div>
     {% endif %}
   </div>
   <div class="mt-8 p-4 border border-dashed border-outline-variant rounded-lg text-center">
-    <p class="text-xs text-slate-500 font-medium">All engines operating within normal latency parameters.</p>
+    {% if running_jobs %}
+    <p class="text-xs text-primary font-medium">{{ running_jobs | length }} job{{ 's' if running_jobs | length > 1 }} running</p>
+    {% else %}
+    <p class="text-xs text-slate-500 font-medium">All systems idle. Next run scheduled above.</p>
+    {% endif %}
   </div>
 </div>

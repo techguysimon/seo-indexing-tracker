@@ -1,51 +1,68 @@
+<!-- Pipeline Pulse: Submissions Today -->
 <div class="bg-surface-container-lowest p-6 rounded-xl border-0 shadow-sm flex flex-col justify-between">
   <div class="flex justify-between items-start">
     <div class="p-2 bg-primary-fixed rounded-lg text-primary">
-      <span class="material-symbols-outlined">link</span>
+      <span class="material-symbols-outlined">upload</span>
     </div>
-    <span class="text-primary font-bold text-xs">+12%</span>
+    <span class="text-primary font-bold text-xs">{{ metrics.pipeline_pulse.submissions_per_hour }}/hr</span>
   </div>
   <div class="mt-4">
-    <p class="font-label text-[11px] font-bold text-slate-500 uppercase tracking-widest">Queued URLs</p>
-    <h3 class="font-headline text-3xl font-extrabold text-on-surface mt-1">{{ metrics.queued_urls }}</h3>
+    <p class="font-label text-[11px] font-bold text-slate-500 uppercase tracking-widest">Submitted Today</p>
+    <h3 class="font-headline text-3xl font-extrabold text-on-surface mt-1">{{ metrics.pipeline_pulse.submissions_today }}</h3>
   </div>
 </div>
 
+<!-- Pipeline Pulse: Verified Today -->
 <div class="bg-surface-container-lowest p-6 rounded-xl border-0 shadow-sm flex flex-col justify-between">
   <div class="flex justify-between items-start">
     <div class="p-2 bg-tertiary-fixed rounded-lg text-tertiary">
-      <span class="material-symbols-outlined">edit_note</span>
+      <span class="material-symbols-outlined">verified</span>
     </div>
-    <span class="text-tertiary font-bold text-xs">-2%</span>
+    <span class="text-tertiary font-bold text-xs">{{ metrics.pipeline_pulse.verifications_per_hour }}/hr</span>
   </div>
   <div class="mt-4">
-    <p class="font-label text-[11px] font-bold text-slate-500 uppercase tracking-widest">Manual Overrides</p>
-    <h3 class="font-headline text-3xl font-extrabold text-on-surface mt-1">{{ metrics.manual_overrides }}</h3>
+    <p class="font-label text-[11px] font-bold text-slate-500 uppercase tracking-widest">Verified Today</p>
+    <h3 class="font-headline text-3xl font-extrabold text-on-surface mt-1">{{ metrics.pipeline_pulse.verifications_today }}</h3>
   </div>
 </div>
 
+<!-- Pipeline Pulse: Indexing Quota -->
 <div class="bg-surface-container-lowest p-6 rounded-xl border-0 shadow-sm flex flex-col justify-between">
   <div class="flex justify-between items-start">
     <div class="p-2 bg-secondary-fixed rounded-lg text-secondary">
-      <span class="material-symbols-outlined">public</span>
+      <span class="material-symbols-outlined">speed</span>
     </div>
-    <span class="text-primary font-bold text-xs">Active</span>
+    {% set indexing_pct = ((metrics.pipeline_pulse.indexing_quota_used / metrics.pipeline_pulse.indexing_quota_limit * 100) | round(0) | int) if metrics.pipeline_pulse.indexing_quota_limit > 0 else 0 %}
+    {% if indexing_pct >= 90 %}
+    <span class="text-red-500 font-bold text-xs">{{ indexing_pct }}%</span>
+    {% elif indexing_pct >= 60 %}
+    <span class="text-amber-500 font-bold text-xs">{{ indexing_pct }}%</span>
+    {% else %}
+    <span class="text-primary font-bold text-xs">{{ indexing_pct }}%</span>
+    {% endif %}
   </div>
   <div class="mt-4">
-    <p class="font-label text-[11px] font-bold text-slate-500 uppercase tracking-widest">Active Websites</p>
-    <h3 class="font-headline text-3xl font-extrabold text-on-surface mt-1">{{ metrics.active_websites }}</h3>
+    <p class="font-label text-[11px] font-bold text-slate-500 uppercase tracking-widest">Indexing Quota</p>
+    <h3 class="font-headline text-3xl font-extrabold text-on-surface mt-1">{{ metrics.pipeline_pulse.indexing_quota_remaining }}</h3>
+    <p class="text-[11px] text-slate-400 mt-1">remaining of {{ metrics.pipeline_pulse.indexing_quota_limit }}</p>
+    <div class="h-1.5 w-full bg-surface-container-high rounded-full overflow-hidden mt-2">
+      <div class="h-full bg-gradient-to-r from-primary to-primary_container rounded-full" style="width: {{ indexing_pct }}%"></div>
+    </div>
   </div>
 </div>
 
+<!-- Pipeline Pulse: Queued URLs -->
 <div class="bg-surface-container-lowest p-6 rounded-xl border-0 shadow-sm flex flex-col justify-between">
   <div class="flex justify-between items-start">
     <div class="p-2 bg-surface-container-high rounded-lg text-on-surface-variant">
-      <span class="material-symbols-outlined">monitoring</span>
+      <span class="material-symbols-outlined">pending_actions</span>
     </div>
-    <span class="text-slate-400 font-bold text-xs">Stable</span>
+    {% set total_queued = metrics.queued_urls %}
+    <span class="text-slate-400 font-bold text-xs">Queue</span>
   </div>
   <div class="mt-4">
-    <p class="font-label text-[11px] font-bold text-slate-500 uppercase tracking-widest">Tracked URLs</p>
-    <h3 class="font-headline text-3xl font-extrabold text-on-surface mt-1">{{ metrics.tracked_urls }}</h3>
+    <p class="font-label text-[11px] font-bold text-slate-500 uppercase tracking-widest">Queued URLs</p>
+    <h3 class="font-headline text-3xl font-extrabold text-on-surface mt-1">{{ total_queued }}</h3>
+    <p class="text-[11px] text-slate-400 mt-1">awaiting submission</p>
   </div>
 </div>

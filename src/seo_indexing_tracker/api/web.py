@@ -282,6 +282,7 @@ async def dashboard(
             "metrics": metrics,
             "activities": activities,
             "running_jobs": system_status["running_jobs"],
+            "last_completed_runs": system_status.get("last_completed_runs", {}),
             "next_scheduled_runs": system_status["next_scheduled_runs"],
             "refresh_trigger": system_status["refresh_trigger"],
         },
@@ -321,10 +322,11 @@ async def dashboard_system_status_partial(
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
     templates = _get_templates(request)
+    system_ctx = await _build_system_status_context(request=request, session=session)
     return templates.TemplateResponse(
         request=request,
         name="partials/system_status.html",
-        context=await _build_system_status_context(request=request, session=session),
+        context=system_ctx,
     )
 
 
@@ -346,6 +348,17 @@ async def queue_status_partial(
         (
             await session.scalar(
                 select(func.count()).select_from(URL).where(URL.current_priority >= 0.8)
+            )
+        )
+        or 0
+    )
+    low_priority_count = int(
+        (
+            await session.scalar(
+                select(func.count()).select_from(URL).where(
+                    URL.current_priority > 0,
+                    URL.current_priority < 0.8,
+                )
             )
         )
         or 0
@@ -389,6 +402,7 @@ async def queue_status_partial(
         context={
             "queued_count": queued_count,
             "high_priority_count": high_priority_count,
+            "low_priority_count": low_priority_count,
             "websites_eta": websites_eta,
             "quota_reset_at": quota_reset_at,
         },
