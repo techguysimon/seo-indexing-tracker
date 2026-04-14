@@ -9,17 +9,19 @@
     <div class="bg-surface-container-lowest p-4 rounded-lg flex items-center justify-between">
       <div>
         <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">Queued Now</p>
-        <h4 class="font-headline text-xl font-extrabold text-primary">{{ queued_count }}</h4>
+        <h4 class="font-headline text-xl font-extrabold text-primary">{{ queued_count | default(0) }}</h4>
       </div>
       <div class="text-right">
         <p class="font-label text-[10px] font-bold text-slate-400 uppercase tracking-widest">Breakdown</p>
-        <p class="text-[11px] text-slate-500"><span class="font-semibold text-on-surface">{{ high_priority_count }}</span> high / <span class="font-semibold text-on-surface">{{ low_priority_count }}</span> low</p>
+        <p class="text-[11px] text-slate-500"><span class="font-semibold text-on-surface">{{ high_priority_count | default(0) }}</span> high / <span class="font-semibold text-on-surface">{{ low_priority_count | default(0) }}</span> low</p>
       </div>
     </div>
 
     <!-- Queue progress bar -->
-    {% if queued_count > 0 %}
-    {% set high_pct = ((high_priority_count / queued_count) * 100) | round(0) | int %}
+    {% set _queued = queued_count | default(0) %}
+    {% set _high = high_priority_count | default(0) %}
+    {% if _queued > 0 %}
+    {% set high_pct = ((_high / _queued) * 100) | round(0) | int %}
     <div class="flex h-2 w-full rounded-full overflow-hidden">
       <div class="h-full bg-primary" style="width: {{ high_pct }}%"></div>
       <div class="h-full bg-surface-container-high" style="width: {{ 100 - high_pct }}%"></div>
@@ -101,7 +103,7 @@
     <div class="flex items-center gap-2">
       <span class="material-symbols-outlined text-primary text-sm">schedule</span>
       <p class="text-[11px] leading-relaxed text-primary-container font-medium">
-        Quota resets at <strong class="font-bold">{{ quota_reset_at.strftime('%-I:%M %p UTC') }}</strong>
+        Quota resets at <strong class="font-bold">{{ quota_reset_at | datetime_us }}</strong>
       </p>
     </div>
   </div>
