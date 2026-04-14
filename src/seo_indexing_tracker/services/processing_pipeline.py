@@ -520,15 +520,19 @@ class SchedulerProcessingPipelineService:
         for sitemap_id in sitemap_ids:
             discovery_result = await self._discovery_service.discover_urls(sitemap_id)
             refreshed_sitemaps += 1
-            discovered_urls += (
-                discovery_result.new_count + discovery_result.modified_count
-            )
 
-            sitemap_url_ids = await self._list_sitemap_url_ids(sitemap_id)
-            if not sitemap_url_ids:
+            # Only enqueue URLs that are genuinely new or changed in this refresh.
+            # Enqueuing ALL sitemap URLs every hour re-queues already-indexed URLs,
+            # which burns inspection quota in the verify-first submission workflow
+            # without ever submitting anything.
+            url_ids_to_enqueue = list(discovery_result.new_url_ids) + list(
+                discovery_result.modified_url_ids
+            )
+            if not url_ids_to_enqueue:
                 continue
 
-            requeued_urls += await self._queue_service.enqueue_many(sitemap_url_ids)
+            discovered_urls += len(url_ids_to_enqueue)
+            requeued_urls += await self._queue_service.enqueue_many(url_ids_to_enqueue)
             last_checkpoint_data = {
                 "job_id": SITEMAP_REFRESH_JOB_ID,
                 "stage": "discovering",
@@ -757,11 +761,6 @@ class SchedulerProcessingPipelineService:
                 .join(Website, Website.id == Sitemap.website_id)
                 .where(Sitemap.is_active.is_(True), Website.is_active.is_(True))
             )
-            return list((await session.scalars(statement)).all())
-
-    async def _list_sitemap_url_ids(self, sitemap_id: UUID) -> list[UUID]:
-        async with session_scope() as session:
-            statement = select(URL.id).where(URL.sitemap_id == sitemap_id)
             return list((await session.scalars(statement)).all())
 
     async def _log_activity(

@@ -35,11 +35,15 @@ Configure these in CapRover's app configuration (Config -> Environment Variables
 | `HOST` | `0.0.0.0` | Server bind address |
 | `PORT` | `8000` | Server port |
 | `SCHEDULER_ENABLED` | `true` | Enable background jobs |
-| `SCHEDULER_URL_SUBMISSION_INTERVAL_SECONDS` | `300` | URL submission frequency |
-| `SCHEDULER_INDEX_VERIFICATION_INTERVAL_SECONDS` | `900` | Verification frequency |
+| `SCHEDULER_URL_SUBMISSION_INTERVAL_SECONDS` | `1800` | URL submission frequency (30 min; 300 is overkill once URLs are indexed) |
+| `SCHEDULER_INDEX_VERIFICATION_INTERVAL_SECONDS` | `3600` | Verification frequency (1 hr; 900 burns through 2000/day quota in ~5 runs) |
 | `SCHEDULER_SITEMAP_REFRESH_INTERVAL_SECONDS` | `3600` | Sitemap refresh frequency |
-| `INDEXING_DAILY_QUOTA_LIMIT` | `200` | Indexing API daily limit |
-| `INSPECTION_DAILY_QUOTA_LIMIT` | `2000` | Inspection API daily limit |
+| `SCHEDULER_URL_SUBMISSION_BATCH_SIZE` | `50` | URLs per submission run |
+| `SCHEDULER_INDEX_VERIFICATION_BATCH_SIZE` | `80` | URLs per verification run (80/hr × 24 = 1920/day, fits within 2000 quota) |
+| `SCHEDULER_INDEXED_REVERIFICATION_MIN_AGE_SECONDS` | `604800` | Don't re-check indexed URLs more than once per 7 days |
+| `INDEXING_DAILY_QUOTA_LIMIT` | `200` | Indexing API daily limit (Google default) |
+| `INSPECTION_DAILY_QUOTA_LIMIT` | `2000` | Inspection API daily limit (Google default) |
+| `QUOTA_RATE_LIMIT_COOLDOWN_SECONDS` | `3600` | How long to pause after a 429 |
 | `OUTBOUND_HTTP_USER_AGENT` | `BlueBeastBuildAgent` | HTTP User-Agent |
 | `GOOGLE_CLIENT_ID` | `your-client-id.apps.googleusercontent.com` | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | `your-client-secret` | Google OAuth client secret |

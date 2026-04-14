@@ -56,6 +56,8 @@ class URLDiscoveryResult:
     new_count: int
     modified_count: int
     unchanged_count: int
+    new_url_ids: tuple[UUID, ...] = ()
+    modified_url_ids: tuple[UUID, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -758,9 +760,12 @@ class URLDiscoveryService:
                         discovered_lastmod
                     )
 
-                    is_potentially_changed = (
-                        normalized_existing_lastmod is None
-                        or normalized_discovered_lastmod is None
+                    # Only flag as potentially changed when the presence of lastmod
+                    # differs (one has it, the other doesn't). If both are None we
+                    # have no timestamp information on either side, so treat as
+                    # unchanged rather than forcing a re-enqueue every refresh.
+                    is_potentially_changed = (normalized_existing_lastmod is None) != (
+                        normalized_discovered_lastmod is None
                     )
                     is_modified = (
                         is_potentially_changed
@@ -828,6 +833,26 @@ class URLDiscoveryService:
                     content_type=fetch_result.content_type,
                 ) from exc
 
+            # Collect IDs for newly inserted URLs so callers can enqueue only
+            # what actually changed (avoids re-queueing every URL every refresh).
+            modified_url_ids: tuple[UUID, ...] = tuple(
+                cast(UUID, row["b_id"]) for row in modified_rows
+            )
+            if new_rows:
+                new_url_strs = [str(row["url"]) for row in new_rows]
+                new_url_ids: tuple[UUID, ...] = tuple(
+                    (
+                        await session.scalars(
+                            select(URL.id).where(
+                                URL.website_id == sitemap.website_id,
+                                URL.url.in_(new_url_strs),
+                            )
+                        )
+                    ).all()
+                )
+            else:
+                new_url_ids = ()
+
             await self._update_refresh_progress(
                 session=session,
                 refresh_progress=refresh_progress,
@@ -843,6 +868,8 @@ class URLDiscoveryService:
                 new_count=len(new_rows),
                 modified_count=len(modified_rows),
                 unchanged_count=unchanged_count,
+                new_url_ids=new_url_ids,
+                modified_url_ids=modified_url_ids,
             )
 
     async def _start_refresh_progress(
