@@ -43,18 +43,55 @@ seo_indexing_tracker/
 │   │   ├── web.py           # Web UI routes
 │   │   └── config_validation.py  # Settings validation
 │   ├── services/            # Business logic layer
-│   │   ├── scheduler.py     # APScheduler wrapper
-│   │   ├── processing_pipeline.py  # Scheduled job execution
-│   │   ├── priority_queue.py # URL priority queue
-│   │   ├── url_discovery.py # Sitemap URL extraction
-│   │   ├── rate_limiter.py  # API rate limiting
-│   │   ├── google_api_factory.py  # Google API client factory
-│   │   ├── google_url_inspection_client.py  # URL Inspection API
-│   │   └── ...
+│   │   ├── scheduler.py                # APScheduler wrapper
+│   │   ├── processing_pipeline.py      # Scheduled job execution (3 core jobs)
+│   │   ├── job_runner.py               # Job execution with overlap protection
+│   │   ├── job_recovery_service.py     # Crash recovery for interrupted jobs
+│   │   ├── priority_queue.py           # URL priority queue
+│   │   ├── url_discovery.py            # Sitemap URL extraction
+│   │   ├── url_submission_service.py   # Indexing API submissions
+│   │   ├── url_inspection_service.py   # URL Inspection API verification
+│   │   ├── url_item_builder.py         # URL record construction
+│   │   ├── trigger_indexing_service.py # Manual trigger workflows
+│   │   ├── batch_processor.py          # Batch submission/verification
+│   │   ├── rate_limiter.py             # API rate limiting (semaphores)
+│   │   ├── cooldown_service.py         # Rate limit cooldown tracking
+│   │   ├── quota_service.py            # Per-website quota tracking
+│   │   ├── quota_discovery_service.py  # Quota auto-discovery from APIs
+│   │   ├── google_api_factory.py       # Google API client factory
+│   │   ├── google_credentials.py       # Service account credential loading
+│   │   ├── google_indexing_client.py   # Indexing API wrapper
+│   │   ├── google_url_inspection_client.py  # URL Inspection API wrapper
+│   │   ├── google_errors.py            # Google API error classification
+│   │   ├── sitemap_fetcher.py          # Sitemap HTTP fetch + decompression
+│   │   ├── sitemap_decompressor.py     # Gzip/content-encoding handling
+│   │   ├── sitemap_index_parser.py     # Sitemap index XML parsing
+│   │   ├── sitemap_url_parser.py       # URL sitemap XML parsing
+│   │   ├── sitemap_type_detector.py    # Sitemap type classification
+│   │   ├── config_validation.py        # Settings/sitemap URL validation
+│   │   ├── index_stats_service.py      # Index coverage statistics
+│   │   ├── queue_eta_service.py        # Queue ETA calculations
+│   │   ├── queue_template_service.py   # Queue table template data
+│   │   ├── dashboard_service.py        # Dashboard template data
+│   │   ├── website_detail_service.py   # Website detail page data
+│   │   ├── activity_service.py         # Activity log queries
+│   │   └── auth_service.py             # Google OAuth + JWT auth
 │   ├── schemas/             # Pydantic models for API payloads
-│   ├── models/             # SQLAlchemy ORM models
+│   ├── models/              # SQLAlchemy ORM models
+│   │   ├── base.py                      # Base model
+│   │   ├── website.py                   # Website records
+│   │   ├── url.py                       # Discovered URLs
+│   │   ├── sitemap.py                   # Sitemap records
+│   │   ├── sitemap_refresh_progress.py  # Sitemap fetch progress
+│   │   ├── service_account.py           # Service account credentials
+│   │   ├── index_status.py              # Index verification results
+│   │   ├── submission_log.py            # API submission history
+│   │   ├── quota_usage.py               # Daily quota counters
+│   │   ├── rate_limit_state.py          # Rate limiter state
+│   │   ├── job_execution.py             # Job run tracking
+│   │   └── activity_log.py              # Activity feed events
 │   ├── utils/              # Utility helpers
-│   ├── templates/          # Jinja2 HTML templates
+│   ├── templates/          # Jinja2 HTML templates (IndexPulse design)
 │   └── static/             # CSS, JS assets
 ├── docs/                   # Architecture documentation
 ├── tests/                  # Test suite
@@ -185,15 +222,40 @@ All settings are defined in `src/seo_indexing_tracker/config.py` and loaded from
 | `HOST` | Server host | `0.0.0.0` |
 | `PORT` | Server port | `8000` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
+| `LOG_FORMAT` | Log output format (`json` or `text`) | `text` |
+| `LOG_FILE` | Optional log file path | None |
 | `OUTBOUND_HTTP_USER_AGENT` | User-Agent used for outbound sitemap/config validation HTTP requests | `BlueBeastBuildAgent` |
 | `SCHEDULER_ENABLED` | Enable scheduler jobs | `true` |
+| `SCHEDULER_JOBSTORE_URL` | APScheduler jobstore database URL | `sqlite:///./scheduler-jobs.sqlite` |
 | `SCHEDULER_URL_SUBMISSION_INTERVAL_SECONDS` | URL submission frequency | `300` |
+| `SCHEDULER_URL_SUBMISSION_BATCH_SIZE` | URLs per submission batch | `100` |
 | `SCHEDULER_INDEX_VERIFICATION_INTERVAL_SECONDS` | Verification frequency | `900` |
+| `SCHEDULER_INDEX_VERIFICATION_BATCH_SIZE` | URLs per verification batch | `100` |
+| `SCHEDULER_INDEXED_REVERIFICATION_MIN_AGE_SECONDS` | Min age before re-verifying indexed URLs (default 7 days) | `604800` |
 | `SCHEDULER_SITEMAP_REFRESH_INTERVAL_SECONDS` | Sitemap refresh frequency | `3600` |
+| `INDEXING_DAILY_QUOTA_LIMIT` | Default daily Indexing API quota per website | `200` |
+| `INSPECTION_DAILY_QUOTA_LIMIT` | Default daily Inspection API quota per website | `2000` |
+| `QUOTA_RATE_LIMIT_COOLDOWN_SECONDS` | Cooldown after hitting rate limit | `3600` |
+| `JOB_RECOVERY_AUTO_RESUME` | Auto-resume interrupted jobs on startup | `false` |
+| `SHUTDOWN_GRACE_PERIOD_SECONDS` | Grace period for in-flight jobs on shutdown | `30` |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID (enables auth) | `""` |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | `""` |
+| `ADMIN_EMAILS` | Comma-separated admin email addresses | `""` |
+| `GUEST_EMAILS` | Comma-separated guest email addresses | `""` |
+| `JWT_SECRET_KEY` | JWT signing key for session tokens | `""` |
+| `JWT_EXPIRY_HOURS` | JWT token lifetime in hours | `24` |
 
 `python-multipart` is required for form parsing in web UI routes (`request.form()`). It is installed via project dependencies.
 
-Web UI and admin routes are unauthenticated by default. In deployed environments, require external protections (reverse proxy auth, network ACLs, VPN, private ingress, etc.).
+### Authentication
+
+When `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are configured, the app uses Google OAuth for login. Users are classified as:
+
+- **Admin** (`ADMIN_EMAILS`): Full access — CRUD websites, sitemaps, service accounts, queue management, trigger indexing
+- **Guest** (`GUEST_EMAILS`): Read-only access — dashboard, queue view, URL inspection
+- **Unauthenticated**: When auth is not configured, all routes are open (development mode)
+
+JWT tokens are issued on login (`JWT_SECRET_KEY`, `JWT_EXPIRY_HOURS`). Without `GOOGLE_CLIENT_ID` set, the app runs in unauthenticated mode.
 
 ## Architectural Patterns
 
@@ -214,6 +276,30 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
 ### Service Layer Pattern
 
 Business logic resides in `services/` modules. API routes delegate to services, keeping route handlers thin.
+
+### Indexing Pipeline (3 Core Jobs)
+
+The processing pipeline (`services/processing_pipeline.py`) runs three scheduled jobs:
+
+1. **Sitemap Refresh** (`sitemap-refresh-job`, default 1h): Discovers new/modified URLs from registered sitemaps. Parses XML, detects `<lastmod>` changes, enqueues new URLs.
+
+2. **URL Submission** (`url-submission-job`, default 5m): Dequeues highest-priority URLs and submits them to Google's Indexing API. Respects per-website quota limits and rate limiting.
+
+3. **Index Verification** (`index-verification-job`, default 15m): Queries the URL Inspection API to verify actual index status. Re-verification skips recently-checked URLs (7-day min age by default).
+
+All jobs use `job_runner.py` for overlap protection (prevents concurrent runs of the same job) and `job_recovery_service.py` for crash recovery.
+
+### Jinja2 Template Filters
+
+Registered in `main.py`, available in all templates:
+
+| Filter | Usage | Example |
+|:---|:---|:---|
+| `datetime_us` | Full US datetime | `{{ event.created_at \| datetime_us }}` → `4-13-2026 1:58 PM` |
+| `datetime_relative` | Relative time | `{{ item.updated_at \| datetime_relative }}` → `5 mins ago` |
+| `humanize_date` | Alias for `datetime_relative` | `{{ item.last_crawl_at \| humanize_date }}` |
+
+All filters convert UTC to Eastern Time automatically.
 
 ### Rate Limiting
 
