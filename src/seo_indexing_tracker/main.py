@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 import uvicorn
 
 from seo_indexing_tracker.api.activity import router as activity_router
@@ -254,6 +255,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await close_database()
 
 
+class ProxyAwareSchemeMiddleware:
+    """Middleware that makes url_for() respect X-Forwarded-Proto."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            forwarded_proto = None
+            for key, value in scope["headers"]:
+                if key == b"x-forwarded-proto":
+                    forwarded_proto = value.decode()
+                    break
+            if forwarded_proto:
+                scope["scheme"] = forwarded_proto
+        await self.app(scope, receive, send)
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     setup_logging(settings)
@@ -296,6 +315,7 @@ def create_app() -> FastAPI:
 
     app.state.settings = settings
     app.state.templates = templates
+    app.add_middleware(ProxyAwareSchemeMiddleware)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
     add_request_logging_middleware(app)
     app.mount(
