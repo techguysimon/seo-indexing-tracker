@@ -1,56 +1,85 @@
 {% set canonical_mismatch = item.google_canonical and item.user_canonical and item.google_canonical != item.user_canonical %}
-<tr>
-  <td class="url-cell-truncate" title="{{ item.url }}">{{ item.url }}</td>
-  <td>
-    <span class="status-badge status-{{ item.latest_index_status.value | lower | replace('_', '-') }}">
-      {{ item.latest_index_status.value }}
-    </span>
+<tr class="hover:bg-surface-container-low/30 transition-colors group">
+  <td class="py-4 px-4">
+    <span class="text-sm font-medium text-on-surface truncate max-w-xs cursor-help" title="{{ item.url }}">{{ item.url }}</span>
   </td>
-  <td>
-    {% if item.last_submitted_at %}
-    <span class="pill pill-success">Submitted</span>
-    <small>{{ item.last_submitted_at.strftime('%Y-%m-%d %H:%M') }}</small>
+  <td class="py-4 px-4">
+    {% set status_val = item.latest_index_status.value %}
+    {% if status_val == 'INDEXED' %}
+    <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-secondary-container text-on-secondary-container inline-flex items-center gap-1">
+      <span class="w-1 h-1 rounded-full bg-secondary"></span>
+      {{ status_val }}
+    </span>
+    {% elif status_val == 'ERROR' %}
+    <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-error-container text-on-error-container inline-flex items-center gap-1">
+      <span class="w-1 h-1 rounded-full bg-error"></span>
+      {{ status_val }}
+    </span>
+    {% elif status_val == 'BLOCKED' or status_val == 'SOFT_404' %}
+    <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-tertiary-fixed text-on-tertiary-fixed-variant inline-flex items-center gap-1">
+      <span class="w-1 h-1 rounded-full bg-tertiary"></span>
+      {{ status_val }}
+    </span>
     {% else %}
-    <span class="pill">Not submitted</span>
+    <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-surface-container-high text-on-surface-variant inline-flex items-center gap-1">
+      <span class="w-1 h-1 rounded-full bg-outline"></span>
+      {{ status_val }}
+    </span>
     {% endif %}
   </td>
-  <td>{{ item.last_checked_at or "-" }}</td>
-  <td>{{ item.last_crawl_time or "-" }}</td>
-  <td>{{ item.coverage_state or "-" }}</td>
-  <td>
+  <td class="py-4 px-4">
+    {% if item.last_submitted_at %}
+    <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-secondary-container text-on-secondary-container">Submitted</span>
+    <small class="block text-xs text-on-surface-variant mt-0.5">{{ item.last_submitted_at.strftime('%Y-%m-%d %H:%M') }}</small>
+    {% else %}
+    <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-surface-container-high text-on-surface-variant">Not submitted</span>
+    {% endif %}
+  </td>
+  <td class="py-4 px-4">
+    <span class="text-xs text-on-surface-variant">{{ item.last_checked_at or "-" }}</span>
+  </td>
+  <td class="py-4 px-4">
+    <span class="text-xs text-on-surface-variant">{{ item.last_crawl_time or "-" }}</span>
+  </td>
+  <td class="py-4 px-4">
+    <span class="text-xs text-on-surface-variant">{{ item.coverage_state or "-" }}</span>
+  </td>
+  <td class="py-4 px-4">
     {% if canonical_mismatch %}
-    <span class="pill pill-warn">Mismatch</span>
-    <div class="canonical-notes">
-      <small>Google: {{ item.google_canonical }}</small>
-      <small>User: {{ item.user_canonical }}</small>
+    <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-tertiary-fixed/50 text-tertiary">Mismatch</span>
+    <div class="space-y-0.5 mt-1">
+      <small class="block text-xs text-on-surface-variant truncate max-w-[180px]" title="{{ item.google_canonical }}">Google: {{ item.google_canonical }}</small>
+      <small class="block text-xs text-on-surface-variant truncate max-w-[180px]" title="{{ item.user_canonical }}">User: {{ item.user_canonical }}</small>
     </div>
     {% elif item.google_canonical or item.user_canonical %}
-    <small>{{ item.google_canonical or item.user_canonical }}</small>
+    <small class="text-xs text-on-surface-variant truncate max-w-[180px] block cursor-help" title="{{ item.google_canonical or item.user_canonical }}">{{ item.google_canonical or item.user_canonical }}</small>
     {% else %}
-    -
+    <span class="text-xs text-on-surface-variant">-</span>
     {% endif %}
   </td>
-  <td class="actions-cell">
+  <td class="py-4 px-4 text-right">
     {% if error_message %}
-    <div class="inline-error" style="color: var(--color-error, #dc3545); font-size: 0.85em; margin-bottom: 0.25rem;">
+    <div class="text-error text-xs mb-1">
       {{ error_message }}
     </div>
     {% endif %}
-    <button
-      class="btn-sm btn-outline-primary"
-      hx-post="/ui/websites/{{ website.id }}/urls/{{ item.id }}/inspect"
-      hx-target="closest tr"
-      hx-swap="outerHTML"
-      hx-indicator="this"
-      hx-disabled-elt="this"
-    >Inspect</button>
-    <button
-      class="btn-sm btn-outline-secondary"
-      hx-post="/ui/websites/{{ website.id }}/urls/{{ item.id }}/submit"
-      hx-target="closest tr"
-      hx-swap="outerHTML"
-      hx-indicator="this"
-      hx-disabled-elt="this"
-    >Submit</button>
+    <div class="flex items-center gap-2 justify-end">
+      <button
+        class="text-primary hover:bg-primary/5 rounded-lg px-3 py-1 text-xs font-bold transition-colors"
+        hx-post="/ui/websites/{{ website.id }}/urls/{{ item.id }}/inspect"
+        hx-target="closest tr"
+        hx-swap="outerHTML"
+        hx-indicator="this"
+        hx-disabled-elt="this"
+      >Inspect</button>
+      <button
+        class="text-secondary hover:bg-secondary/5 rounded-lg px-3 py-1 text-xs font-bold transition-colors"
+        hx-post="/ui/websites/{{ website.id }}/urls/{{ item.id }}/submit"
+        hx-target="closest tr"
+        hx-swap="outerHTML"
+        hx-indicator="this"
+        hx-disabled-elt="this"
+      >Submit</button>
+    </div>
   </td>
 </tr>

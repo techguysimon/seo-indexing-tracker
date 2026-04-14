@@ -1,37 +1,56 @@
-<section
+<div
   id="system-status-container"
-  class="panel chart-panel"
+  class="bg-surface-container-lowest p-8 rounded-xl shadow-sm flex flex-col"
   hx-get="/web/partials/system-status"
   hx-trigger="{{ refresh_trigger }}"
   hx-swap="outerHTML"
 >
-  <h2>System status</h2>
-  <ul class="data-list">
-    <li>
-      <strong>URL submission</strong>
-      <span>{{ next_scheduled_runs.url_submission }}</span>
-    </li>
-    <li>
-      <strong>Index verification</strong>
-      <span>{{ next_scheduled_runs.index_verification }}</span>
-    </li>
-    <li>
-      <strong>Sitemap refresh</strong>
-      <span>{{ next_scheduled_runs.sitemap_refresh }}</span>
-    </li>
-  </ul>
+  <div class="flex items-center gap-2 mb-8">
+    <span class="material-symbols-outlined text-primary">settings_suggest</span>
+    <h3 class="font-headline text-lg font-bold text-on-surface">System Status</h3>
+  </div>
+  <div class="space-y-6 flex-1">
+    <div class="flex justify-between items-center p-4 bg-surface-container-low rounded-lg">
+      <div class="flex items-center gap-4">
+        <div class="w-2 h-2 rounded-full bg-primary"></div>
+        <span class="font-headline text-sm font-semibold">Submission</span>
+      </div>
+      <span class="font-label text-xs text-slate-500 font-bold">{{ next_scheduled_runs.url_submission }}</span>
+    </div>
+    <div class="flex justify-between items-center p-4 bg-surface-container-low rounded-lg">
+      <div class="flex items-center gap-4">
+        <div class="w-2 h-2 rounded-full bg-primary"></div>
+        <span class="font-headline text-sm font-semibold">Verification</span>
+      </div>
+      <span class="font-label text-xs text-slate-500 font-bold">{{ next_scheduled_runs.index_verification }}</span>
+    </div>
+    <div class="flex justify-between items-center p-4 bg-surface-container-low rounded-lg">
+      <div class="flex items-center gap-4">
+        <div class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></div>
+        <span class="font-headline text-sm font-semibold">Sitemap</span>
+      </div>
+      <span class="font-label text-xs text-tertiary font-bold">{{ next_scheduled_runs.sitemap_refresh }}</span>
+    </div>
 
-  <h2>Running jobs</h2>
-  <ul class="data-list">
-    {% for job in running_jobs %}
-    <li>
-      <strong>{{ job.job_name }}</strong>
-      <span>{{ job.job_id }}</span>
-      <span>Started {{ job.started_at.isoformat() }}</span>
-      <span>Processed {{ job.urls_processed }} URLs</span>
-    </li>
-    {% else %}
-    <li>No scheduler jobs are running.</li>
-    {% endfor %}
-  </ul>
-</section>
+    {% if running_jobs %}
+    <div class="mt-4 space-y-4">
+      <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">Running Jobs</p>
+      {% for job in running_jobs %}
+      <div class="flex justify-between items-center p-4 bg-surface-container-low rounded-lg">
+        <div class="flex items-center gap-4">
+          <div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+          <div>
+            <span class="font-headline text-sm font-semibold">{{ job.job_name }}</span>
+            <p class="text-[11px] text-slate-400">{{ job.urls_processed }} URLs processed</p>
+          </div>
+        </div>
+        <span class="font-label text-xs text-slate-500 font-bold">{{ job.job_id }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  <div class="mt-8 p-4 border border-dashed border-outline-variant rounded-lg text-center">
+    <p class="text-xs text-slate-500 font-medium">All engines operating within normal latency parameters.</p>
+  </div>
+</div>

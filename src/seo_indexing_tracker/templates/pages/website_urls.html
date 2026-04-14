@@ -12,158 +12,204 @@
   {%- if params %}?{{ params | join('&') }}{% endif -%}
 {%- endmacro -%}
 
-{% block content %}
-<section class="hero-panel">
-  <h1>{{ page_title }}</h1>
-  <p>Review URL-level index inspection outcomes and export filtered results.</p>
-</section>
+{% block page_heading %}{{ page_title }}{% endblock %}
 
-<section class="panel">
+{% block content %}
+
+<section class="px-8 pt-8 pb-6">
   <form
-    class="filter-grid"
+    class="bg-surface-container-lowest rounded-xl p-4 flex flex-wrap items-center gap-4 shadow-sm"
     method="get"
     action="/ui/websites/{{ website.id }}/urls"
     onsubmit="event.preventDefault(); const fd = new FormData(this); const params = new URLSearchParams(); fd.forEach((v, k) => { if (v) params.append(k, v); }); const qs = params.toString(); window.location.href = this.action + (qs ? '?' + qs : '');"
   >
-    <label>
-      Status
-      <select name="status">
-        <option value="">All statuses</option>
-        {% for status_option in status_options %}
-        <option value="{{ status_option.value }}" {% if filters.status and filters.status.value == status_option.value %}selected{% endif %}>{{ status_option.value }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>
-      Sitemap
-      <select name="sitemap_id">
-        <option value="">All sitemaps</option>
-        {% for sitemap in sitemap_options %}
-        <option value="{{ sitemap.id }}" {% if filters.sitemap_id and filters.sitemap_id == sitemap.id %}selected{% endif %}>{{ sitemap.url }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>
-      Search URL
-      <input type="search" name="search" value="{{ filters.search }}" placeholder="contains..." />
-    </label>
-    <label>
-      Page size
-      <select name="page_size">
+    <div class="flex flex-col gap-1.5 min-w-[180px]">
+      <label class="font-label text-[10px] font-bold uppercase tracking-wider text-on-surface-variant ml-1">Status</label>
+      <div class="relative">
+        <select name="status" class="w-full bg-surface-container-low border-none rounded-lg text-sm font-medium py-2 pl-3 pr-10 appearance-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer">
+          <option value="">All statuses</option>
+          {% for status_option in status_options %}
+          <option value="{{ status_option.value }}" {% if filters.status and filters.status.value == status_option.value %}selected{% endif %}>{{ status_option.value }}</option>
+          {% endfor %}
+        </select>
+        <span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-sm" data-icon="expand_more">expand_more</span>
+      </div>
+    </div>
+    <div class="flex flex-col gap-1.5 min-w-[200px]">
+      <label class="font-label text-[10px] font-bold uppercase tracking-wider text-on-surface-variant ml-1">Sitemap</label>
+      <div class="relative">
+        <select name="sitemap_id" class="w-full bg-surface-container-low border-none rounded-lg text-sm font-medium py-2 pl-3 pr-10 appearance-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer">
+          <option value="">All sitemaps</option>
+          {% for sitemap in sitemap_options %}
+          <option value="{{ sitemap.id }}" {% if filters.sitemap_id and filters.sitemap_id == sitemap.id %}selected{% endif %}>{{ sitemap.url }}</option>
+          {% endfor %}
+        </select>
+        <span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-sm" data-icon="expand_more">expand_more</span>
+      </div>
+    </div>
+    <div class="flex-1 flex flex-col gap-1.5">
+      <label class="font-label text-[10px] font-bold uppercase tracking-wider text-on-surface-variant ml-1">Search URL</label>
+      <div class="relative">
+        <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm" data-icon="search">search</span>
+        <input type="search" name="search" value="{{ filters.search }}" placeholder="Filter by path, slug, or domain..." class="w-full bg-surface-container-low border-none rounded-lg text-sm py-2 pl-10 pr-4 focus:ring-2 focus:ring-primary/20 transition-all" />
+      </div>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="font-label text-[10px] font-bold uppercase tracking-wider text-on-surface-variant ml-1">Page size</label>
+      <select name="page_size" class="bg-surface-container-low border-none rounded-lg text-sm font-medium py-2 px-3 appearance-none cursor-pointer pr-8 focus:ring-2 focus:ring-primary/20 transition-all">
         {% for size in [50, 100, 200] %}
         <option value="{{ size }}" {% if filters.page_size == size %}selected{% endif %}>{{ size }}</option>
         {% endfor %}
       </select>
-    </label>
-    <button type="submit" class="panel-button">Apply filters</button>
-    <a
-      class="panel-button panel-button-ghost"
-      href="/api/websites/{{ website.id }}/urls/export{{ url_query_params(filters.status, filters.sitemap_id, filters.search, None, None) }}"
-    >
-      Export CSV
-    </a>
+    </div>
+    <div class="flex items-end gap-2">
+      <button type="submit" class="py-2 px-5 bg-gradient-to-br from-primary to-primary-container text-on-primary text-sm font-bold rounded-xl shadow-lg shadow-primary/20 active:scale-[0.98] transition-transform">Apply</button>
+      <a
+        class="py-2 px-5 text-sm font-bold text-primary hover:bg-primary/5 rounded-xl transition-colors flex items-center gap-2"
+        href="/api/websites/{{ website.id }}/urls/export{{ url_query_params(filters.status, filters.sitemap_id, filters.search, None, None) }}"
+      >
+        <span class="material-symbols-outlined text-sm" data-icon="download">download</span>
+        Export CSV
+      </a>
+    </div>
   </form>
 </section>
 
-<section class="panel">
-  <div class="table-wrap">
-    <table>
+<section class="px-8 pb-32">
+  <div class="bg-surface-container-lowest rounded-2xl overflow-hidden shadow-sm border border-outline-variant/10">
+    <table class="w-full text-left border-collapse">
       <thead>
-        <tr>
-          <th>URL</th>
-          <th>Status</th>
-          <th>Submission</th>
-          <th>Last Checked</th>
-          <th>Last Crawl Time</th>
-          <th>Coverage State</th>
-          <th>Canonical</th>
-          <th>Actions</th>
+        <tr class="bg-surface-container-low/50">
+          <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4">URL</th>
+          <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4">Status</th>
+          <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4">Submission</th>
+          <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4">Last Checked</th>
+          <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4">Last Crawl</th>
+          <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4">Coverage</th>
+          <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4">Canonical</th>
+          <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4 text-right">Actions</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody class="divide-y divide-outline-variant/10">
         {% for item in listing.items %}
         {% set canonical_mismatch = item.google_canonical and item.user_canonical and item.google_canonical != item.user_canonical %}
-        <tr>
-          <td class="url-cell-truncate" title="{{ item.url }}">{{ item.url }}</td>
-          <td>
-            <span class="status-badge status-{{ item.latest_index_status.value | lower | replace('_', '-') }}">
-              {{ item.latest_index_status.value }}
-            </span>
+        <tr class="hover:bg-surface-container-low/30 transition-colors group">
+          <td class="py-4 px-4">
+            <span class="text-sm font-medium text-on-surface truncate max-w-xs cursor-help" title="{{ item.url }}">{{ item.url }}</span>
           </td>
-          <td>
-            {% if item.last_submitted_at %}
-            <span class="pill pill-success">Submitted</span>
-            <small>{{ item.last_submitted_at.strftime('%Y-%m-%d %H:%M') }}</small>
+          <td class="py-4 px-4">
+            {% set status_val = item.latest_index_status.value %}
+            {% if status_val == 'INDEXED' %}
+            <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-secondary-container text-on-secondary-container inline-flex items-center gap-1">
+              <span class="w-1 h-1 rounded-full bg-secondary"></span>
+              {{ status_val }}
+            </span>
+            {% elif status_val == 'ERROR' %}
+            <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-error-container text-on-error-container inline-flex items-center gap-1">
+              <span class="w-1 h-1 rounded-full bg-error"></span>
+              {{ status_val }}
+            </span>
+            {% elif status_val == 'BLOCKED' or status_val == 'SOFT_404' %}
+            <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-tertiary-fixed text-on-tertiary-fixed-variant inline-flex items-center gap-1">
+              <span class="w-1 h-1 rounded-full bg-tertiary"></span>
+              {{ status_val }}
+            </span>
             {% else %}
-            <span class="pill">Not submitted</span>
+            <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-surface-container-high text-on-surface-variant inline-flex items-center gap-1">
+              <span class="w-1 h-1 rounded-full bg-outline"></span>
+              {{ status_val }}
+            </span>
             {% endif %}
           </td>
-          <td>{{ item.last_checked_at or "-" }}</td>
-          <td>{{ item.last_crawl_time or "-" }}</td>
-          <td>{{ item.coverage_state or "-" }}</td>
-          <td>
+          <td class="py-4 px-4">
+            {% if item.last_submitted_at %}
+            <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-secondary-container text-on-secondary-container">Submitted</span>
+            <small class="block text-xs text-on-surface-variant mt-0.5">{{ item.last_submitted_at.strftime('%Y-%m-%d %H:%M') }}</small>
+            {% else %}
+            <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-surface-container-high text-on-surface-variant">Not submitted</span>
+            {% endif %}
+          </td>
+          <td class="py-4 px-4">
+            <span class="text-xs text-on-surface-variant">{{ item.last_checked_at or "-" }}</span>
+          </td>
+          <td class="py-4 px-4">
+            <span class="text-xs text-on-surface-variant">{{ item.last_crawl_time or "-" }}</span>
+          </td>
+          <td class="py-4 px-4">
+            <span class="text-xs text-on-surface-variant">{{ item.coverage_state or "-" }}</span>
+          </td>
+          <td class="py-4 px-4">
             {% if canonical_mismatch %}
-            <span class="pill pill-warn">Mismatch</span>
-            <div class="canonical-notes">
-              <small>Google: {{ item.google_canonical }}</small>
-              <small>User: {{ item.user_canonical }}</small>
+            <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-tertiary-fixed/50 text-tertiary">Mismatch</span>
+            <div class="space-y-0.5 mt-1">
+              <small class="block text-xs text-on-surface-variant truncate max-w-[180px]" title="{{ item.google_canonical }}">Google: {{ item.google_canonical }}</small>
+              <small class="block text-xs text-on-surface-variant truncate max-w-[180px]" title="{{ item.user_canonical }}">User: {{ item.user_canonical }}</small>
             </div>
             {% elif item.google_canonical or item.user_canonical %}
-            <small>{{ item.google_canonical or item.user_canonical }}</small>
+            <small class="text-xs text-on-surface-variant truncate max-w-[180px] block cursor-help" title="{{ item.google_canonical or item.user_canonical }}">{{ item.google_canonical or item.user_canonical }}</small>
             {% else %}
-            -
+            <span class="text-xs text-on-surface-variant">-</span>
             {% endif %}
           </td>
-          <td class="actions-cell">
-            <button
-              class="btn-sm btn-outline-primary"
-              hx-post="/ui/websites/{{ website.id }}/urls/{{ item.id }}/inspect"
-              hx-target="closest tr"
-              hx-swap="outerHTML"
-              hx-indicator="this"
-              hx-disabled-elt="this"
-            >Inspect</button>
-            <button
-              class="btn-sm btn-outline-secondary"
-              hx-post="/ui/websites/{{ website.id }}/urls/{{ item.id }}/submit"
-              hx-target="closest tr"
-              hx-swap="outerHTML"
-              hx-indicator="this"
-              hx-disabled-elt="this"
-            >Submit</button>
+          <td class="py-4 px-4 text-right">
+            <div class="flex items-center justify-end gap-2">
+              <button
+                class="text-primary hover:bg-primary/5 rounded-lg px-3 py-1 text-xs font-bold transition-colors"
+                hx-post="/ui/websites/{{ website.id }}/urls/{{ item.id }}/inspect"
+                hx-target="closest tr"
+                hx-swap="outerHTML"
+                hx-indicator="this"
+                hx-disabled-elt="this"
+              >Inspect</button>
+              <button
+                class="text-secondary hover:bg-secondary/5 rounded-lg px-3 py-1 text-xs font-bold transition-colors"
+                hx-post="/ui/websites/{{ website.id }}/urls/{{ item.id }}/submit"
+                hx-target="closest tr"
+                hx-swap="outerHTML"
+                hx-indicator="this"
+                hx-disabled-elt="this"
+              >Submit</button>
+            </div>
           </td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="8">No URLs matched your filters.</td>
+          <td colspan="8" class="py-8 text-center text-sm text-on-surface-variant">No URLs matched your filters.</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
-  </div>
 
-  <div class="pagination-row">
-    <span>
-      Page {{ listing.page }} of {{ listing.total_pages }}
-      ({{ listing.total_items }} total)
-    </span>
-    <div class="batch-actions">
-      {% if listing.page > 1 %}
-      <a
-        class="panel-button panel-button-ghost"
-        href="/ui/websites/{{ website.id }}/urls{{ url_query_params(filters.status, filters.sitemap_id, filters.search, listing.page - 1, listing.page_size) }}"
-      >
-        Previous
-      </a>
-      {% endif %}
-      {% if listing.page < listing.total_pages %}
-      <a
-        class="panel-button panel-button-ghost"
-        href="/ui/websites/{{ website.id }}/urls{{ url_query_params(filters.status, filters.sitemap_id, filters.search, listing.page + 1, listing.page_size) }}"
-      >
-        Next
-      </a>
-      {% endif %}
+    <div class="flex items-center justify-between px-6 py-5 bg-surface-container-low/30">
+      <span class="text-xs text-on-surface-variant font-medium">
+        Page {{ listing.page }} of {{ listing.total_pages }} ({{ listing.total_items }} total)
+      </span>
+      <div class="flex items-center gap-1">
+        {% if listing.page > 1 %}
+        <a
+          class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-container-high transition-colors text-on-surface"
+          href="/ui/websites/{{ website.id }}/urls{{ url_query_params(filters.status, filters.sitemap_id, filters.search, listing.page - 1, listing.page_size) }}"
+        >
+          <span class="material-symbols-outlined" data-icon="chevron_left">chevron_left</span>
+        </a>
+        {% else %}
+        <span class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 opacity-30">
+          <span class="material-symbols-outlined" data-icon="chevron_left">chevron_left</span>
+        </span>
+        {% endif %}
+        {% if listing.page < listing.total_pages %}
+        <a
+          class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-container-high transition-colors text-on-surface"
+          href="/ui/websites/{{ website.id }}/urls{{ url_query_params(filters.status, filters.sitemap_id, filters.search, listing.page + 1, listing.page_size) }}"
+        >
+          <span class="material-symbols-outlined" data-icon="chevron_right">chevron_right</span>
+        </a>
+        {% else %}
+        <span class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 opacity-30">
+          <span class="material-symbols-outlined" data-icon="chevron_right">chevron_right</span>
+        </span>
+        {% endif %}
+      </div>
     </div>
   </div>
 </section>

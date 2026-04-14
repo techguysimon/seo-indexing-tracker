@@ -3,60 +3,158 @@
 {% block title %}{{ page_title }} | SEO Indexing Tracker{% endblock %}
 
 {% block content %}
-<section class="hero-panel">
-  <h1>{{ page_title }}</h1>
-  <p>Create and review website sources feeding the indexing queue.</p>
-</section>
-
-<section class="panel">
-  {% if feedback %}<p class="feedback">{{ feedback }}</p>{% endif %}
-  {% if current_user.role == 'admin' %}
-  <form class="filter-grid" action="/ui/websites" method="post">
-    <label>
-      Domain
-      <input type="text" name="domain" required placeholder="example.com" />
-    </label>
-    <label>
-      Site URL
-      <input type="text" name="site_url" required placeholder="https://example.com or sc-domain:example.com" />
-    </label>
-    <button type="submit" class="panel-button">Add website</button>
-  </form>
-  {% else %}
-  <p><a href="/login">Sign in with Google to add websites</a></p>
-  {% endif %}
-</section>
-
-<section class="panel">
-  <h2>Registered websites</h2>
-  <ul class="data-list">
-    {% for website in websites %}
-    <li>
-      <strong><a href="/ui/websites/{{ website.id }}">{{ website.domain }}</a></strong>
-      <span>{{ website.site_url }}</span>
-      <span class="pill {% if website.is_active %}pill-ok{% else %}pill-dim{% endif %}">
-        {% if website.is_active %}Active{% else %}Inactive{% endif %}
+<!-- Stats Summary Row -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+  <div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/10">
+    <p class="text-xs font-bold font-label uppercase tracking-widest text-slate-400 mb-1">Total Tracked</p>
+    <div class="flex items-baseline gap-2">
+      <span class="text-3xl font-extrabold font-headline text-on-surface">{{ websites|length }}</span>
+    </div>
+  </div>
+  <div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/10">
+    <p class="text-xs font-bold font-label uppercase tracking-widest text-slate-400 mb-1">Active Sites</p>
+    <div class="flex items-baseline gap-2">
+      <span class="text-3xl font-extrabold font-headline text-on-surface">
+        {% set active_count = namespace(value=0) %}
+        {% for website in websites %}{% if website.is_active %}{% set active_count.value = active_count.value + 1 %}{% endif %}{% endfor %}
+        {{ active_count.value }}
       </span>
-      {% if current_user.role == 'admin' %}
-      <form
-        class="inline-form"
-        hx-delete="/api/websites/{{ website.id }}?hard_delete=true"
-        hx-target="closest li"
-        hx-swap="delete"
-      >
-        <button
-          type="submit"
-          class="panel-button panel-button-danger panel-button-small"
-          onclick="return confirm('Delete this website?')"
-        >
-          Delete website
-        </button>
-      </form>
-      {% endif %}
-    </li>
-    {% else %}
-    <li>No websites configured yet.</li>
-    {% endfor %}
-  </ul>
-</section>
+    </div>
+  </div>
+  <div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/10 flex items-center justify-between">
+    <div>
+      <p class="text-xs font-bold font-label uppercase tracking-widest text-slate-400 mb-1">Indexing Status</p>
+      <div class="flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+        <span class="text-sm font-semibold text-on-surface">Healthy</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Feedback -->
+{% if feedback %}
+<div class="mb-6 bg-secondary-container text-on-secondary-container px-6 py-3 rounded-xl text-sm font-medium">
+  {{ feedback }}
+</div>
+{% endif %}
+
+<!-- Action Bar -->
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+  <div class="relative w-full md:w-96">
+    <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xl">search</span>
+    <input class="w-full bg-surface-container-low border-none rounded-xl py-3 pl-11 pr-4 focus:ring-2 focus:ring-primary/40 text-sm placeholder:text-slate-400" placeholder="Search domains or URLs..." type="text"/>
+  </div>
+  {% if current_user.role == 'admin' %}
+  <button onclick="document.getElementById('add-website-form').classList.toggle('hidden')" class="w-full md:w-auto cta-gradient text-white px-6 py-3 rounded-xl font-headline font-bold flex items-center justify-center gap-2 shadow-lg shadow-primary/20 active:scale-95 transition-transform">
+    <span class="material-symbols-outlined">add_circle</span>
+    Add Website
+  </button>
+  {% endif %}
+</div>
+
+<!-- Add Website Form (collapsible) -->
+{% if current_user.role == 'admin' %}
+<div id="add-website-form" class="hidden mb-8">
+  <form action="/ui/websites" method="post" class="bg-surface-container-lowest p-8 rounded-xl border border-outline-variant/10 space-y-6">
+    <div>
+      <h3 class="text-xl font-extrabold font-headline text-on-surface mb-1">Add Website</h3>
+      <p class="text-sm text-slate-500">Enter your domain details to start tracking indexing coverage.</p>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div>
+        <label class="block text-xs font-bold font-label uppercase tracking-widest text-slate-400 mb-2">Domain Name</label>
+        <input type="text" name="domain" required placeholder="example.com" class="w-full bg-surface-container-low border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/40 text-sm"/>
+      </div>
+      <div>
+        <label class="block text-xs font-bold font-label uppercase tracking-widest text-slate-400 mb-2">Site URL</label>
+        <input type="text" name="site_url" required placeholder="https://example.com or sc-domain:example.com" class="w-full bg-surface-container-low border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/40 text-sm"/>
+      </div>
+    </div>
+    <div class="flex gap-4 justify-end">
+      <button type="button" onclick="document.getElementById('add-website-form').classList.add('hidden')" class="bg-white border border-outline-variant/30 text-slate-600 py-3 px-6 rounded-xl font-headline font-bold hover:bg-slate-50 transition-colors">Cancel</button>
+      <button type="submit" class="cta-gradient text-white py-3 px-6 rounded-xl font-headline font-bold shadow-lg shadow-primary/20">Track Site</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<!-- Websites Table -->
+<div class="bg-surface-container-lowest rounded-xl overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="w-full text-left border-collapse">
+      <thead>
+        <tr class="bg-surface-container-low/50">
+          <th class="px-6 py-4 text-[11px] font-bold font-label uppercase tracking-widest text-slate-500">Website &amp; Domain</th>
+          <th class="px-6 py-4 text-[11px] font-bold font-label uppercase tracking-widest text-slate-500">URL Architecture</th>
+          <th class="px-6 py-4 text-[11px] font-bold font-label uppercase tracking-widest text-slate-500">Status</th>
+          <th class="px-6 py-4 text-[11px] font-bold font-label uppercase tracking-widest text-slate-500 text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-outline-variant/10">
+        {% for website in websites %}
+        <tr class="hover:bg-surface-bright transition-colors group">
+          <td class="px-6 py-5">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-surface-container-low flex items-center justify-center">
+                <span class="material-symbols-outlined text-teal-600">public</span>
+              </div>
+              <div>
+                <a href="/ui/websites/{{ website.id }}" class="text-sm font-bold font-headline text-on-surface hover:text-primary transition-colors">{{ website.domain }}</a>
+                <p class="text-xs text-slate-500">Website</p>
+              </div>
+            </div>
+          </td>
+          <td class="px-6 py-5">
+            <span class="text-sm font-medium text-slate-600">{{ website.site_url }}</span>
+          </td>
+          <td class="px-6 py-5">
+            {% if website.is_active %}
+            <span class="px-3 py-1 rounded-full bg-secondary-container text-on-secondary-container text-[10px] font-bold uppercase tracking-wider">Active</span>
+            {% else %}
+            <span class="px-3 py-1 rounded-full bg-surface-dim text-on-surface-variant text-[10px] font-bold uppercase tracking-wider">Inactive</span>
+            {% endif %}
+          </td>
+          <td class="px-6 py-5 text-right">
+            {% if current_user.role == 'admin' %}
+            <form
+              class="inline"
+              hx-delete="/api/websites/{{ website.id }}?hard_delete=true"
+              hx-target="closest tr"
+              hx-swap="delete"
+            >
+              <button
+                type="submit"
+                class="p-2 text-slate-400 hover:text-error hover:bg-error-container/20 rounded-lg transition-all"
+                onclick="return confirm('Delete this website?')"
+              >
+                <span class="material-symbols-outlined">delete</span>
+              </button>
+            </form>
+            {% else %}
+            <button class="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all">
+              <span class="material-symbols-outlined">more_vert</span>
+            </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4" class="px-6 py-12 text-center">
+            <span class="material-symbols-outlined text-4xl text-slate-300 mb-2 block">language</span>
+            <p class="text-sm font-medium text-slate-500">No websites configured yet.</p>
+            {% if current_user.role == 'admin' %}
+            <p class="text-xs text-slate-400 mt-1">Click "Add Website" to get started.</p>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <!-- Pagination -->
+  <div class="px-6 py-4 bg-surface-container-low/30 border-t border-outline-variant/10 flex items-center justify-between">
+    <p class="text-xs font-medium text-slate-500">Showing {{ websites|length }} website{% if websites|length != 1 %}s{% endif %}</p>
+  </div>
+</div>
 {% endblock %}

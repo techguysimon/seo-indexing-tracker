@@ -1,51 +1,193 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{% block title %}SEO Indexing Tracker{% endblock %}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Source+Sans+3:wght@400;600&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="{{ request.url_for('static', path='css/app.css') }}" />
-    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
-  </head>
-  <body>
-    <div class="page-shell">
-      <header class="site-header">
-        <a class="brand" href="/">SEO Indexing Tracker</a>
-        <nav aria-label="Primary" class="site-nav">
-          <a href="/">Dashboard</a>
-          <a href="/ui/queue">Queue</a>
-          <a href="/ui/websites">Websites</a>
-          <a href="/ui/sitemaps">Sitemaps</a>
-          <a href="/health">Health</a>
-          {% if current_user %}
-            {% if current_user.role == 'admin' %}
-              <span style="font-size: 12px; background: #6366f1; color: white; padding: 2px 8px; border-radius: 4px;">Admin</span>
-            {% endif %}
-            <span style="font-size: 14px; opacity: 0.8;">{{ current_user.email }} ({{ current_user.role }})</span>
-            <a href="/logout">Logout</a>
-          {% else %}
-            <a href="/login">Login</a>
-          {% endif %}
-        </nav>
-      </header>
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}SEO Indexing Tracker{% endblock %}</title>
 
-      <main class="site-main">{% block content %}{% endblock %}</main>
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 
-      <footer class="site-footer">
-        <p>Environment: {{ settings.LOG_LEVEL }} mode</p>
-        {% if current_user %}
-          <p>Signed in as {{ current_user.email }} · {{ current_user.role }}</p>
-        {% else %}
-          <p><a href="/login">Sign in with Google</a></p>
-        {% endif %}
-      </footer>
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface-container-low": "#f2f4f6",
+            "surface-container": "#eceef0",
+            "on-tertiary": "#ffffff",
+            "on-primary-fixed": "#00201f",
+            "on-secondary": "#ffffff",
+            "on-primary": "#ffffff",
+            "surface-bright": "#f7f9fb",
+            "surface": "#f7f9fb",
+            "primary": "#006260",
+            "surface-dim": "#d8dadc",
+            "on-primary-fixed-variant": "#00504e",
+            "on-background": "#191c1e",
+            "on-surface-variant": "#3e4948",
+            "on-secondary-container": "#4a6a68",
+            "on-primary-container": "#cafffc",
+            "secondary": "#446462",
+            "on-secondary-fixed": "#00201f",
+            "inverse-primary": "#7ad6d2",
+            "tertiary-fixed-dim": "#ffb595",
+            "secondary-fixed-dim": "#abcdcb",
+            "tertiary-container": "#a55d3b",
+            "on-tertiary-container": "#fff2ee",
+            "primary-fixed": "#97f2ee",
+            "surface-container-highest": "#e0e3e5",
+            "on-error-container": "#93000a",
+            "primary-container": "#0b7d7a",
+            "on-error": "#ffffff",
+            "inverse-surface": "#2d3133",
+            "secondary-container": "#c6e9e7",
+            "background": "#f7f9fb",
+            "on-surface": "#191c1e",
+            "primary-fixed-dim": "#7ad6d2",
+            "outline-variant": "#bdc9c7",
+            "outline": "#6e7978",
+            "error-container": "#ffdad6",
+            "surface-container-lowest": "#ffffff",
+            "tertiary-fixed": "#ffdbcd",
+            "on-tertiary-fixed": "#351000",
+            "error": "#ba1a1a",
+            "inverse-on-surface": "#eff1f3",
+            "secondary-fixed": "#c6e9e7",
+            "surface-tint": "#006a67",
+            "surface-variant": "#e0e3e5",
+            "surface-container-high": "#e6e8ea",
+            "on-secondary-fixed-variant": "#2c4c4b",
+            "tertiary": "#874525",
+            "on-tertiary-fixed-variant": "#723517"
+          },
+          borderRadius: { DEFAULT: "0.5rem", lg: "0.75rem", xl: "1rem", full: "9999px" },
+          fontFamily: { headline: ["Manrope"], body: ["Inter"], label: ["Inter"] }
+        }
+      }
+    }
+  </script>
+
+  <!-- App CSS -->
+  <link rel="stylesheet" href="{{ request.url_for('static', path='css/app.css') }}"/>
+
+  <!-- HTMX & Alpine -->
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+</head>
+
+<body class="bg-background text-on-background font-body antialiased">
+
+<!-- Sidebar (desktop) -->
+<aside class="hidden md:flex flex-col h-screen w-64 fixed left-0 top-0 bg-slate-50 border-r-0 p-4 gap-2 z-50">
+  <div class="flex items-center gap-3 px-2 py-4 mb-6">
+    <div class="w-10 h-10 rounded-lg bg-primary flex items-center justify-center text-on-primary">
+      <span class="material-symbols-outlined">rocket_launch</span>
     </div>
-  </body>
+    <div>
+      <h1 class="font-headline text-lg font-extrabold text-teal-700 tracking-tight">IndexPulse</h1>
+      <p class="text-[10px] uppercase tracking-widest text-slate-500 font-bold">SEO Architecture</p>
+    </div>
+  </div>
+
+  <nav class="flex-1 space-y-1">
+    <a href="/"
+       class="flex items-center gap-3 px-3 py-2 text-teal-700 bg-white rounded-lg shadow-sm font-bold transition-all duration-200">
+      <span class="material-symbols-outlined">dashboard</span>
+      <span class="font-headline text-sm">Dashboard</span>
+    </a>
+    <a href="/ui/websites"
+       class="flex items-center gap-3 px-3 py-2 text-slate-500 hover:bg-slate-100 transition-all duration-200 hover:translate-x-1">
+      <span class="material-symbols-outlined">language</span>
+      <span class="font-headline text-sm">Websites</span>
+    </a>
+    <a href="/ui/queue"
+       class="flex items-center gap-3 px-3 py-2 text-slate-500 hover:bg-slate-100 transition-all duration-200 hover:translate-x-1">
+      <span class="material-symbols-outlined">queue_play_next</span>
+      <span class="font-headline text-sm">Global Queue</span>
+    </a>
+    <a href="#"
+       class="flex items-center gap-3 px-3 py-2 text-slate-500 hover:bg-slate-100 transition-all duration-200 hover:translate-x-1">
+      <span class="material-symbols-outlined">settings</span>
+      <span class="font-headline text-sm">Settings</span>
+    </a>
+  </nav>
+
+  <div class="mt-auto">
+    <button class="w-full py-3 px-4 bg-gradient-to-br from-primary to-primary-container text-on-primary rounded-lg font-headline font-bold text-sm shadow-md active:scale-95 duration-150 flex items-center justify-center gap-2">
+      <span class="material-symbols-outlined text-sm">add</span>
+      New Index Job
+    </button>
+  </div>
+</aside>
+
+<!-- Main wrapper -->
+<main class="md:ml-64 min-h-screen">
+
+  <!-- Top header -->
+  <header class="sticky top-0 z-40 w-full bg-white/80 backdrop-blur-md px-6 py-3 flex justify-between items-center shadow-sm">
+    <div class="flex items-center gap-4">
+      <h2 class="font-headline text-xl font-bold tracking-tight text-teal-700">{% block page_heading %}{{ page_title }}{% endblock %}</h2>
+      <div class="hidden lg:flex items-center gap-2 px-3 py-1 bg-surface-container-low rounded-full">
+        <div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+        <span class="font-label text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Live System Monitoring</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-1">
+        <button class="p-2 text-slate-500 hover:bg-slate-50 rounded-full transition-colors active:scale-95">
+          <span class="material-symbols-outlined">notifications</span>
+        </button>
+        <button class="p-2 text-slate-500 hover:bg-slate-50 rounded-full transition-colors active:scale-95">
+          <span class="material-symbols-outlined">search</span>
+        </button>
+      </div>
+      <div class="h-8 w-[1px] bg-slate-200 mx-2"></div>
+      {% if current_user %}
+      <div class="flex items-center gap-3">
+        <div class="text-right hidden sm:block">
+          <p class="font-headline text-sm font-semibold text-on-surface">{{ current_user.email }}</p>
+          <p class="font-label text-[10px] text-slate-500 uppercase tracking-tighter">{{ current_user.role }}</p>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </header>
+
+  <!-- Content area -->
+  <div class="p-8 max-w-[1600px] mx-auto space-y-8">
+    {% block content %}{% endblock %}
+  </div>
+
+  <!-- Footer -->
+  <footer class="px-8 pb-8 max-w-[1600px] mx-auto">
+    <p class="text-xs text-slate-400">Environment: {{ settings.LOG_LEVEL }} mode</p>
+  </footer>
+</main>
+
+<!-- Mobile bottom nav -->
+<nav class="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 flex justify-around p-3 z-50">
+  <a href="/" class="flex flex-col items-center gap-1 text-teal-700">
+    <span class="material-symbols-outlined">dashboard</span>
+    <span class="text-[10px] font-bold">Dash</span>
+  </a>
+  <a href="/ui/websites" class="flex flex-col items-center gap-1 text-slate-400">
+    <span class="material-symbols-outlined">language</span>
+    <span class="text-[10px] font-bold">Sites</span>
+  </a>
+  <a href="/ui/queue" class="flex flex-col items-center gap-1 text-slate-400">
+    <span class="material-symbols-outlined">queue_play_next</span>
+    <span class="text-[10px] font-bold">Queue</span>
+  </a>
+  <a href="#" class="flex flex-col items-center gap-1 text-slate-400">
+    <span class="material-symbols-outlined">settings</span>
+    <span class="text-[10px] font-bold">Settings</span>
+  </a>
+</nav>
+
+</body>
 </html>

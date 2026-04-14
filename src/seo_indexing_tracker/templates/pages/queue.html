@@ -3,45 +3,62 @@
 {% block title %}{{ page_title }} | SEO Indexing Tracker{% endblock %}
 
 {% block content %}
-<section class="hero-panel">
-  <h1>{{ page_title }}</h1>
-  <p>Filter, reprioritize, and batch-manage URLs in the submission queue.</p>
-</section>
+<section class="px-8 pt-8 pb-6">
+  <div class="flex items-center gap-4 mb-2">
+    <h2 class="text-xl font-bold tracking-tight text-teal-700 font-headline">{{ page_title }}</h2>
+  </div>
+  <p class="text-sm text-on-surface-variant mb-6">Filter, reprioritize, and batch-manage URLs in the submission queue.</p>
 
-<section class="panel">
   <form
-    class="filter-grid"
+    class="bg-surface-container-lowest rounded-xl p-4 flex flex-wrap items-center gap-4 shadow-sm"
     hx-get="/web/partials/queue-table"
     hx-target="#queue-table-region"
     hx-swap="innerHTML"
   >
-    <label>
-      Website
-      <select name="website_id">
-        <option value="">All websites</option>
-        {% for website in websites %}
-        <option value="{{ website.id }}" {% if filters.website_id == website.id %}selected{% endif %}>
-          {{ website.domain }}
-        </option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>
-      Search URL
-      <input type="search" name="search" value="{{ filters.search }}" placeholder="/blog/" />
-    </label>
-    <label class="checkbox-wrap">
-      <input type="hidden" name="queued_only" value="false" />
-      <input type="checkbox" name="queued_only" value="true" {% if filters.queued_only %}checked{% endif %} />
-      Only queued URLs
-    </label>
+    <!-- Website Selector -->
+    <div class="flex flex-col gap-1.5 min-w-[200px]">
+      <label class="font-label text-[10px] font-bold uppercase tracking-wider text-on-surface-variant ml-1">Website</label>
+      <div class="relative group">
+        <select name="website_id" class="w-full bg-surface-container-low border-none rounded-lg text-sm font-medium py-2 pl-3 pr-10 appearance-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer">
+          <option value="">All websites</option>
+          {% for website in websites %}
+          <option value="{{ website.id }}" {% if filters.website_id == website.id %}selected{% endif %}>
+            {{ website.domain }}
+          </option>
+          {% endfor %}
+        </select>
+        <span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">expand_more</span>
+      </div>
+    </div>
+
+    <!-- URL Search -->
+    <div class="flex-1 flex flex-col gap-1.5">
+      <label class="font-label text-[10px] font-bold uppercase tracking-wider text-on-surface-variant ml-1">URL Search</label>
+      <div class="relative">
+        <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+        <input type="search" name="search" value="{{ filters.search }}" placeholder="Filter by path, slug, or domain..." class="w-full bg-surface-container-low border-none rounded-lg text-sm py-2 pl-10 pr-4 focus:ring-2 focus:ring-primary/20 transition-all" />
+      </div>
+    </div>
+
+    <!-- Only Queued Toggle -->
+    <div class="flex items-center gap-4 bg-surface-container-low h-[40px] px-4 rounded-lg">
+      <span class="text-sm font-medium text-on-surface-variant">Only Queued</span>
+      <label class="relative inline-flex items-center cursor-pointer">
+        <input type="hidden" name="queued_only" value="false" />
+        <input type="checkbox" name="queued_only" value="true" {% if filters.queued_only %}checked{% endif %} class="sr-only peer" onchange="this.previousElementSibling.disabled=this.checked" />
+        <div class="w-8 h-4 bg-outline-variant rounded-full peer peer-checked:bg-primary transition-colors relative after:content-[''] after:absolute after:right-1 after:top-1 after:w-2 after:h-2 after:bg-white after:rounded-full peer-checked:after:right-auto peer-checked:after:left-1 transition-all"></div>
+      </label>
+    </div>
+
+    <!-- Hidden fields -->
     <input type="hidden" name="page" value="1" />
     <input type="hidden" name="page_size" value="{{ filters.page_size }}" />
-    <button type="submit" class="panel-button">Apply filters</button>
+
+    <button type="submit" class="px-4 py-2 bg-primary text-on-primary text-sm font-bold rounded-lg hover:bg-primary-container transition-colors">Apply</button>
   </form>
 </section>
 
-<section id="queue-table-region">
+<section id="queue-table-region" class="px-8 pb-32">
   {% include "partials/queue_table.html" %}
 </section>
 {% endblock %}

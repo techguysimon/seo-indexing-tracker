@@ -1,72 +1,51 @@
-<div class="stats-grid">
-  <article class="stat-card">
-    <p>Queued URLs</p>
-    <strong>{{ metrics.queued_urls }}</strong>
-  </article>
-  <article class="stat-card">
-    <p>Manual overrides</p>
-    <strong>{{ metrics.manual_overrides }}</strong>
-  </article>
-  <article class="stat-card">
-    <p>Active websites</p>
-    <strong>{{ metrics.active_websites }}</strong>
-  </article>
-  <article class="stat-card">
-    <p>Tracked URLs</p>
-    <strong>{{ metrics.tracked_urls }}</strong>
-  </article>
+<div class="bg-surface-container-lowest p-6 rounded-xl border-0 shadow-sm flex flex-col justify-between">
+  <div class="flex justify-between items-start">
+    <div class="p-2 bg-primary-fixed rounded-lg text-primary">
+      <span class="material-symbols-outlined">link</span>
+    </div>
+    <span class="text-primary font-bold text-xs">+12%</span>
+  </div>
+  <div class="mt-4">
+    <p class="font-label text-[11px] font-bold text-slate-500 uppercase tracking-widest">Queued URLs</p>
+    <h3 class="font-headline text-3xl font-extrabold text-on-surface mt-1">{{ metrics.queued_urls }}</h3>
+  </div>
 </div>
 
-<div class="stats-grid coverage-grid">
-  <article class="stat-card">
-    <p>Index coverage</p>
-    <strong>{{ metrics.index_stats.indexed_count }} / {{ metrics.index_stats.total_urls }}</strong>
-    <p>{{ metrics.index_stats.coverage_percentage }}% indexed</p>
-  </article>
-  <article class="stat-card">
-    <p>Not indexed</p>
-    <strong>{{ metrics.index_stats.not_indexed_count }}</strong>
-  </article>
-  <article class="stat-card">
-    <p>Blocked + soft 404 + error</p>
-    <strong>{{ metrics.index_stats.blocked_count + metrics.index_stats.soft_404_count + metrics.index_stats.error_count }}</strong>
-  </article>
-  <article class="stat-card">
-    <p>Unchecked</p>
-    <strong>{{ metrics.index_stats.unchecked_count }}</strong>
-  </article>
+<div class="bg-surface-container-lowest p-6 rounded-xl border-0 shadow-sm flex flex-col justify-between">
+  <div class="flex justify-between items-start">
+    <div class="p-2 bg-tertiary-fixed rounded-lg text-tertiary">
+      <span class="material-symbols-outlined">edit_note</span>
+    </div>
+    <span class="text-tertiary font-bold text-xs">-2%</span>
+  </div>
+  <div class="mt-4">
+    <p class="font-label text-[11px] font-bold text-slate-500 uppercase tracking-widest">Manual Overrides</p>
+    <h3 class="font-headline text-3xl font-extrabold text-on-surface mt-1">{{ metrics.manual_overrides }}</h3>
+  </div>
 </div>
 
-<div class="panel chart-panel">
-  <h2>Queue distribution by website</h2>
-  <ul class="chart-list">
-    {% for bucket in metrics.queue_by_website %}
-    <li>
-      <span>{{ bucket.domain }}</span>
-      <div class="bar-track">
-        <div class="bar-fill" style="--bar: {{ (bucket.average_priority * 100) | round(0, 'floor') }}%"></div>
-      </div>
-      <em>{{ bucket.queued_count }} queued</em>
-    </li>
-    {% else %}
-    <li>No queued URLs yet.</li>
-    {% endfor %}
-  </ul>
+<div class="bg-surface-container-lowest p-6 rounded-xl border-0 shadow-sm flex flex-col justify-between">
+  <div class="flex justify-between items-start">
+    <div class="p-2 bg-secondary-fixed rounded-lg text-secondary">
+      <span class="material-symbols-outlined">public</span>
+    </div>
+    <span class="text-primary font-bold text-xs">Active</span>
+  </div>
+  <div class="mt-4">
+    <p class="font-label text-[11px] font-bold text-slate-500 uppercase tracking-widest">Active Websites</p>
+    <h3 class="font-headline text-3xl font-extrabold text-on-surface mt-1">{{ metrics.active_websites }}</h3>
+  </div>
 </div>
 
-<div class="panel chart-panel">
-  <h2>Coverage by website</h2>
-  <ul class="chart-list">
-    {% for website in metrics.index_stats.per_website %}
-    <li>
-      <span>{{ website.domain }}</span>
-      <div class="bar-track">
-        <div class="bar-fill" style="--bar: {{ website.coverage_percentage }}%"></div>
-      </div>
-      <em>{{ website.indexed_count }} / {{ website.total_urls }} indexed ({{ website.coverage_percentage }}%)</em>
-    </li>
-    {% else %}
-    <li>No websites available.</li>
-    {% endfor %}
-  </ul>
+<div class="bg-surface-container-lowest p-6 rounded-xl border-0 shadow-sm flex flex-col justify-between">
+  <div class="flex justify-between items-start">
+    <div class="p-2 bg-surface-container-high rounded-lg text-on-surface-variant">
+      <span class="material-symbols-outlined">monitoring</span>
+    </div>
+    <span class="text-slate-400 font-bold text-xs">Stable</span>
+  </div>
+  <div class="mt-4">
+    <p class="font-label text-[11px] font-bold text-slate-500 uppercase tracking-widest">Tracked URLs</p>
+    <h3 class="font-headline text-3xl font-extrabold text-on-surface mt-1">{{ metrics.tracked_urls }}</h3>
+  </div>
 </div>

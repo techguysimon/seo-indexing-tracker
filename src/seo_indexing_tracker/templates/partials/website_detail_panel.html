@@ -1,19 +1,42 @@
-{% if feedback %}<p class="feedback">{{ feedback }}</p>{% endif %}
+{% if feedback %}<p class="mb-6 px-4 py-3 bg-primary-container/20 text-primary rounded-lg font-label text-sm font-bold">{{ feedback }}</p>{% endif %}
 
-<section class="panel">
-  <h2>Website details</h2>
-  <ul class="data-list">
-    <li>
-      <strong>{{ website.domain }}</strong>
-      <span>{{ website.site_url }}</span>
-      <span>Quota status: <strong>{{ quota_status.status }}</strong></span>
-      <span>Indexing quota: {{ quota_status.indexing.used }} / {{ quota_status.indexing.limit }} (confidence: {{ "%.0f" | format(quota_status.confidence * 100) }}%)</span>
-      <div class="bar-track quota-track" role="img" aria-label="Indexing quota usage progress">
-        <div class="bar-fill quota-indexing" style="--bar: {{ "%.2f" | format(quota_status.indexing.percentage_used) }}%;"></div>
-      </div>
-      <span>Inspection quota: {{ quota_status.inspection.used }} / {{ quota_status.inspection.limit }} (confidence: {{ quota_status.confidence_percentage }}%)</span>
-      <div class="bar-track quota-track" role="img" aria-label="Inspection quota usage progress">
-        <div class="bar-fill quota-inspection" style="--bar: {{ "%.2f" | format(quota_status.inspection.percentage_used) }}%;"></div>
+<!-- Header Section -->
+<section class="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6">
+  <div>
+    <div class="flex items-center gap-3 mb-2">
+      <h1 class="text-4xl font-extrabold tracking-tight font-headline text-on-surface">{{ website.domain }}</h1>
+      <span class="px-3 py-1 rounded-full {% if website.is_active %}bg-secondary-container text-on-secondary-container{% else %}bg-surface-container-high text-on-surface-variant{% endif %} text-xs font-bold font-label uppercase tracking-widest">
+        {% if website.is_active %}Active{% else %}Inactive{% endif %}
+      </span>
+    </div>
+    <a class="group flex items-center gap-2 text-primary font-semibold text-sm hover:underline" href="/ui/websites/{{ website.id }}/urls">
+      <span>View all URLs</span>
+      <span class="material-symbols-outlined text-sm">arrow_outward</span>
+    </a>
+  </div>
+  {% if current_user and current_user.role == 'admin' %}
+  <form
+    action="/ui/websites/{{ website.id }}/trigger"
+    method="post"
+    hx-post="/ui/websites/{{ website.id }}/trigger"
+    hx-target="#website-detail-region"
+    hx-swap="innerHTML"
+  >
+    <button type="submit" class="bg-gradient-to-br from-primary to-primary-container text-white px-8 py-3 rounded-lg font-headline font-bold text-sm shadow-sm hover:opacity-90 active:scale-95 transition-all">
+      Trigger Indexing
+    </button>
+  </form>
+  {% endif %}
+</section>
+
+<!-- Quota Cards -->
+<section class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+  <!-- Indexing API Card -->
+  <div class="bg-surface-container-lowest p-8 rounded-xl relative overflow-hidden group">
+    <div class="flex justify-between items-start mb-6">
+      <div>
+        <span class="font-label text-xs text-outline uppercase tracking-widest block mb-1">Quota Pool</span>
+        <h3 class="text-xl font-bold font-headline">Indexing API</h3>
       </div>
       {% if current_user and current_user.role == 'admin' %}
       <form
@@ -24,240 +47,352 @@
         hx-target="#website-detail-region"
         hx-swap="innerHTML"
       >
-        <button type="submit" class="panel-button panel-button-small">Test quota</button>
+        <button type="submit" class="text-primary font-semibold text-xs py-1 px-3 rounded bg-surface-container-low hover:bg-surface-container transition-colors">Test Quota</button>
       </form>
-      {% else %}
-      <span class="text-muted">Quota management requires admin access</span>
       {% endif %}
-      <span>Indexed URLs: {{ index_stats.indexed_count }}</span>
-      <span>Not indexed URLs: {{ index_stats.not_indexed_count }}</span>
-      <span>Coverage: {{ index_stats.coverage_percentage }}%</span>
-      <div class="quota-override">
-        {% if current_user and current_user.role == 'admin' %}
-        <button 
-          class="btn btn-small" 
-          hx-get="/ui/websites/{{ website.id }}/quota-edit"
-          hx-target="#quota-edit-container"
-          hx-swap="innerHTML"
-        >
-          Set Quota
-        </button>
-        {% endif %}
-        <div id="quota-edit-container"></div>
+    </div>
+    <div class="mb-6">
+      <div class="flex justify-between items-end mb-2">
+        <span class="text-4xl font-extrabold font-headline text-on-surface">{{ quota_status.indexing.used }}<span class="text-lg font-medium text-outline">/{{ quota_status.indexing.limit }}</span></span>
+        <span class="font-label text-sm font-bold text-primary">{{ "%.0f" | format(quota_status.indexing.percentage_used) }}% Used</span>
       </div>
-      {% if website_eta %}
-      <section class="eta-section">
-        <h3>Queue Status</h3>
-        <div class="eta-grid">
-          <div class="eta-queue">
-            <strong>Submission Queue</strong>
-            <span>Queued: {{ website_eta.submission_queue.queued }}</span>
-            <span>Rate: {{ website_eta.submission_queue.rate_per_minute }} URLs/min</span>
-            {% if website_eta.status == 'paused' %}
-            <span class="pill pill-dim">Paused</span>
-            {% elif website_eta.submission_queue.eta_minutes is none %}
-            <span class="pill pill-success">Complete</span>
-            {% elif website_eta.submission_queue.quota_remaining == 0 %}
-            <span class="pill pill-warning">Waiting for quota</span>
-            <span>ETA: {{ website_eta.submission_queue.eta_minutes }} min</span>
-            {% else %}
-            <span>ETA: ~{{ website_eta.submission_queue.eta_minutes }} min</span>
-            {% endif %}
+      <div class="w-full h-3 bg-surface-container-high rounded-full overflow-hidden">
+        <div class="h-full bg-gradient-to-r from-primary to-primary-container rounded-full" style="width: {{ "%.2f" | format(quota_status.indexing.percentage_used) }}%"></div>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="material-symbols-outlined text-primary text-xl" style="font-variation-settings: 'FILL' 1;">verified</span>
+      <span class="text-sm font-body text-on-surface-variant">Confidence: <span class="font-bold text-on-surface">{{ "%.1f" | format(quota_status.confidence * 100) }}%</span></span>
+    </div>
+  </div>
+
+  <!-- Inspection API Card -->
+  <div class="bg-surface-container-lowest p-8 rounded-xl relative overflow-hidden group">
+    <div class="flex justify-between items-start mb-6">
+      <div>
+        <span class="font-label text-xs text-outline uppercase tracking-widest block mb-1">Quota Pool</span>
+        <h3 class="text-xl font-bold font-headline">Inspection API</h3>
+      </div>
+      {% if current_user and current_user.role == 'admin' %}
+      <form
+        class="inline-form"
+        action="/ui/websites/{{ website.id }}/quota/discover"
+        method="post"
+        hx-post="/ui/websites/{{ website.id }}/quota/discover"
+        hx-target="#website-detail-region"
+        hx-swap="innerHTML"
+      >
+        <button type="submit" class="text-primary font-semibold text-xs py-1 px-3 rounded bg-surface-container-low hover:bg-surface-container transition-colors">Test Quota</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="mb-6">
+      <div class="flex justify-between items-end mb-2">
+        <span class="text-4xl font-extrabold font-headline text-on-surface">{{ quota_status.inspection.used }}<span class="text-lg font-medium text-outline">/{{ quota_status.inspection.limit }}</span></span>
+        <span class="font-label text-sm font-bold text-primary">{{ "%.0f" | format(quota_status.inspection.percentage_used) }}% Used</span>
+      </div>
+      <div class="w-full h-3 bg-surface-container-high rounded-full overflow-hidden">
+        <div class="h-full bg-gradient-to-r from-primary to-primary-container rounded-full" style="width: {{ "%.2f" | format(quota_status.inspection.percentage_used) }}%"></div>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="material-symbols-outlined text-primary text-xl" style="font-variation-settings: 'FILL' 1;">verified</span>
+      <span class="text-sm font-body text-on-surface-variant">Confidence: <span class="font-bold text-on-surface">{{ quota_status.confidence_percentage }}%</span></span>
+    </div>
+  </div>
+</section>
+
+<!-- Tabbed Content Section -->
+<section class="bg-surface-container-lowest rounded-xl overflow-hidden" x-data="{active:'sitemaps'}">
+  <!-- Tabs Header -->
+  <div class="flex px-8 border-b border-outline-variant/15">
+    <button @click="active='sitemaps'" :class="active==='sitemaps' ? 'border-b-2 border-primary text-primary font-bold' : 'text-slate-500 hover:text-primary'" class="px-6 py-5 transition-colors text-sm font-headline">Sitemaps</button>
+    <button @click="active='queue'" :class="active==='queue' ? 'border-b-2 border-primary text-primary font-bold' : 'text-slate-500 hover:text-primary'" class="px-6 py-5 transition-colors text-sm font-headline">Queue ETA</button>
+    <button @click="active='config'" :class="active==='config' ? 'border-b-2 border-primary text-primary font-bold' : 'text-slate-500 hover:text-primary'" class="px-6 py-5 transition-colors text-sm font-headline">Configuration</button>
+  </div>
+
+  <!-- Sitemaps Tab -->
+  <div x-show="active==='sitemaps'" class="p-8">
+    {% if current_user and current_user.role == 'admin' %}
+    <form
+      class="flex gap-4 mb-8 p-6 bg-surface-container-low rounded-lg items-end"
+      action="/ui/websites/{{ website.id }}/sitemaps"
+      method="post"
+      hx-post="/ui/websites/{{ website.id }}/sitemaps"
+      hx-target="#website-detail-region"
+      hx-swap="innerHTML"
+    >
+      <div class="flex-1">
+        <label class="block font-label text-xs font-bold uppercase tracking-widest text-outline mb-2">Add New Sitemap URL</label>
+        <input type="url" name="url" required placeholder="https://example.com/sitemap_index.xml" class="w-full bg-white border-none rounded-lg focus:ring-2 focus:ring-primary/40 text-sm py-3 px-4 shadow-sm"/>
+      </div>
+      <button type="submit" class="bg-primary text-white h-[44px] px-6 rounded-lg font-headline font-bold text-sm active:scale-95 transition-all">Add Sitemap</button>
+    </form>
+    {% endif %}
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-left border-separate border-spacing-0">
+        <thead>
+          <tr class="font-label text-[11px] font-bold uppercase tracking-widest text-outline">
+            <th class="pb-4 px-4">Sitemap URL</th>
+            <th class="pb-4 px-4">Type</th>
+            <th class="pb-4 px-4">Last Status</th>
+            <th class="pb-4 px-4">URLs Found</th>
+            <th class="pb-4 px-4 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="text-sm">
+          {% for sitemap in sitemaps %}
+          {%- set progress = sitemap_progress.get(sitemap.id) -%}
+          <tr class="hover:bg-surface-container-low transition-colors group">
+            <td class="py-4 px-4 font-medium text-on-surface">{{ sitemap.url }}</td>
+            <td class="py-4 px-4 text-on-surface-variant">{{ sitemap.sitemap_type.value }}</td>
+            <td class="py-4 px-4">
+              {%- if progress -%}
+              {%- if progress.status == "complete" -%}
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-primary-container/20 text-primary">Refresh Success</span>
+              {%- elif progress.status == "error" -%}
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-error-container text-on-error-container" {% if progress.errors %}title="{{ progress.errors }}"{% endif %}>Refresh Fail</span>
+              {%- elif progress.status in ("fetching", "parsing", "discovering") -%}
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-primary-container/20 text-primary">{{ progress.status }}</span>
+              {%- else -%}
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-surface-container-high text-on-surface-variant">{{ progress.status }}</span>
+              {%- endif -%}
+              {%- else -%}
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-surface-container-high text-on-surface-variant">Not refreshed</span>
+              {%- endif -%}
+            </td>
+            <td class="py-4 px-4 text-on-surface-variant">
+              {%- if progress and progress.status == "complete" -%}
+              {{ "{:,}".format(progress.urls_found) }}
+              {%- else -%}
+              -
+              {%- endif -%}
+            </td>
+            <td class="py-4 px-4 text-right">
+              <div class="flex items-center justify-end gap-1">
+                {% if current_user and current_user.role == 'admin' %}
+                <form
+                  class="inline-form"
+                  action="/ui/sitemaps/{{ sitemap.id }}/delete"
+                  method="post"
+                  hx-post="/ui/sitemaps/{{ sitemap.id }}/delete"
+                  hx-target="#website-detail-region"
+                  hx-swap="innerHTML"
+                >
+                  <button type="submit" class="material-symbols-outlined text-outline hover:text-error transition-colors" onclick="return confirm('Delete this sitemap?')" title="Delete sitemap">delete</button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5" class="py-8 px-4 text-center text-on-surface-variant">No sitemaps configured yet.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Queue ETA Tab -->
+  <div x-show="active==='queue'" x-cloak class="p-8">
+    {% if website_eta %}
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Submission Queue -->
+      <div class="bg-surface-container-low p-6 rounded-xl">
+        <div class="flex items-center justify-between mb-4">
+          <span class="flex items-center gap-2 font-headline font-bold">
+            <span class="material-symbols-outlined text-primary">send</span>
+            Submission Queue
+          </span>
+          {% if website_eta.status == 'paused' %}
+          <span class="text-xs font-label font-bold text-on-surface-variant uppercase">Paused</span>
+          {% elif website_eta.submission_queue.eta_minutes is none %}
+          <span class="text-xs font-label font-bold text-primary uppercase">Complete</span>
+          {% elif website_eta.submission_queue.quota_remaining == 0 %}
+          <span class="text-xs font-label font-bold text-on-surface-variant uppercase">Waiting</span>
+          {% else %}
+          <span class="text-xs font-label font-bold text-primary uppercase">Real-time</span>
+          {% endif %}
+        </div>
+        <div class="space-y-4">
+          <div class="flex justify-between items-center">
+            <span class="text-sm text-on-surface-variant">Current Backlog</span>
+            <span class="text-xl font-bold">{{ "{:,}".format(website_eta.submission_queue.queued) }} <span class="text-xs font-normal text-outline">URLs</span></span>
           </div>
-          <div class="eta-queue">
-            <strong>Verification Queue</strong>
-            <span>Queued: {{ website_eta.verification_queue.queued }}</span>
-            <span>Rate: {{ website_eta.verification_queue.rate_per_minute }} URLs/min</span>
+          <div class="flex justify-between items-center">
+            <span class="text-sm text-on-surface-variant">Processing Rate</span>
+            <span class="text-sm font-medium">{{ website_eta.submission_queue.rate_per_minute }} <span class="text-xs font-normal text-outline">URLs/min</span></span>
+          </div>
+          <div class="pt-4 border-t border-outline-variant/15 flex justify-between items-center">
+            <span class="text-sm font-bold text-on-surface">Estimated ETA</span>
             {% if website_eta.status == 'paused' %}
-            <span class="pill pill-dim">Paused</span>
-            {% elif website_eta.verification_queue.eta_minutes is none %}
-            <span class="pill pill-success">Complete</span>
-            {% elif website_eta.verification_queue.quota_remaining == 0 %}
-            <span class="pill pill-warning">Waiting for quota</span>
-            <span>ETA: {{ website_eta.verification_queue.eta_minutes }} min</span>
+            <span class="text-lg font-extrabold text-on-surface-variant">--</span>
+            {% elif website_eta.submission_queue.eta_minutes is none %}
+            <span class="text-lg font-extrabold text-primary">Complete</span>
+            {% elif website_eta.submission_queue.quota_remaining == 0 %}
+            <span class="text-lg font-extrabold text-on-surface-variant">Waiting for quota</span>
             {% else %}
-            <span>ETA: ~{{ website_eta.verification_queue.eta_minutes }} min</span>
+            <span class="text-lg font-extrabold text-primary">~{{ website_eta.submission_queue.eta_minutes }} mins</span>
             {% endif %}
           </div>
         </div>
-        <span class="text-muted">Quota resets at {{ website_eta.quota_reset_at[:16] }} ET</span>
-      </section>
-      {% endif %}
-      <a class="panel-button panel-button-ghost" href="/ui/websites/{{ website.id }}/urls">View URL drill-down</a>
-    </li>
-  </ul>
-</section>
+      </div>
 
-<section class="panel">
-  <h2>Service account</h2>
-  {% if service_account %}
-  <ul class="data-list">
-    <li>
-      <strong>{{ service_account.name }}</strong>
-      <span>{{ service_account.credentials_path }}</span>
-      <span>Scopes: {{ service_account.scopes | join(", ") }}</span>
-      {% if current_user and current_user.role == 'admin' %}
-      <form
-        class="inline-form"
-        action="/ui/websites/{{ website.id }}/service-account/delete"
-        method="post"
-        hx-post="/ui/websites/{{ website.id }}/service-account/delete"
-        hx-target="#website-detail-region"
-        hx-swap="innerHTML"
-      >
-        <button
-          type="submit"
-          class="panel-button panel-button-danger panel-button-small"
-          onclick="return confirm('Delete this service account?')"
-        >
-          Delete service account
-        </button>
-      </form>
-      {% else %}
-      <span class="text-muted">Service account management requires admin access</span>
-      {% endif %}
-    </li>
-  </ul>
-  {% else %}
-  <p>Not configured yet.</p>
-  {% if current_user and current_user.role == 'admin' %}
-  <form
-    class="filter-grid"
-    action="/ui/websites/{{ website.id }}/service-account"
-    method="post"
-    hx-post="/ui/websites/{{ website.id }}/service-account"
-    hx-target="#website-detail-region"
-    hx-swap="innerHTML"
-  >
-    <label>
-      Name
-      <input type="text" name="name" required placeholder="Production Service Account" />
-    </label>
-    <label>
-      Credentials path
-      <input
-        type="text"
-        name="credentials_path"
-        required
-        placeholder="/app/service-accounts/website-service-account.json"
-      />
-    </label>
-    <label class="checkbox-wrap">
-      <input type="checkbox" name="scopes" value="indexing" checked />
-      Indexing scope
-    </label>
-    <label class="checkbox-wrap">
-      <input type="checkbox" name="scopes" value="webmasters" checked />
-      Webmasters scope
-    </label>
-    <button type="submit" class="panel-button">Save service account</button>
-  </form>
-  {% else %}
-  <span class="text-muted">Service account management requires admin access</span>
-  {% endif %}
-  {% endif %}
-</section>
-
-<section class="panel">
-  <h2>Sitemaps</h2>
-  {% if current_user and current_user.role == 'admin' %}
-  <form
-    class="filter-grid"
-    action="/ui/websites/{{ website.id }}/sitemaps"
-    method="post"
-    hx-post="/ui/websites/{{ website.id }}/sitemaps"
-    hx-target="#website-detail-region"
-    hx-swap="innerHTML"
-  >
-    <label>
-      Sitemap URL
-      <input type="url" name="url" required placeholder="https://example.com/sitemap.xml" />
-    </label>
-    <label>
-      Sitemap type
-      <select name="sitemap_type" required>
-        {% for sitemap_type in sitemap_types %}
-        <option value="{{ sitemap_type }}">{{ sitemap_type }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button type="submit" class="panel-button">Add sitemap</button>
-  </form>
-  {% else %}
-  <span class="text-muted">Sitemap management requires admin access</span>
-  {% endif %}
-
-  <ul class="data-list">
-    {% for sitemap in sitemaps %}
-    {%- set progress = sitemap_progress.get(sitemap.id) -%}
-    <li>
-      <strong>{{ sitemap.url }}</strong>
-      <span>Type: {{ sitemap.sitemap_type.value }}</span>
-      <span class="pill {% if sitemap.is_active %}pill-ok{% else %}pill-dim{% endif %}">
-        {% if sitemap.is_active %}Active{% else %}Inactive{% endif %}
-      </span>
-      
-      {%- if progress -%}
-      {%- if progress.status == "complete" -%}
-      <span class="pill pill-success">✓ complete</span>
-      {%- elif progress.status == "error" -%}
-      <span class="pill pill-danger" {% if progress.errors %}title="{{ progress.errors }}"{% endif %}>✗ error{% if progress.errors %}: {{ progress.errors[:50] }}{% if progress.errors|length > 50 %}...{% endif %}{% endif %}</span>
-      {%- elif progress.status in ("fetching", "parsing", "discovering") -%}
-      <span class="pill pill-info"><span class="spinner"></span> {{ progress.status }}</span>
-      {%- else -%}
-      <span class="pill pill-dim">{{ progress.status }}</span>
-      {%- endif -%}
-      
-      {%- if progress.status == "complete" and progress.urls_found > 0 -%}
-      <span class="text-muted">URLs: {{ "{:,}".format(progress.urls_found) }} ({{ "{:,}".format(progress.urls_new) }} new, {{ "{:,}".format(progress.urls_modified) }} modified)</span>
-      {%- endif -%}
-      
-      <span class="text-muted">Last refresh: {{ progress.updated_at|datetime_relative }}</span>
-      {%- else -%}
-      <span class="pill pill-dim">Not refreshed</span>
-      {%- endif -%}
-      
-      {% if current_user and current_user.role == 'admin' %}
-      <form
-        class="inline-form"
-        action="/ui/sitemaps/{{ sitemap.id }}/delete"
-        method="post"
-        hx-post="/ui/sitemaps/{{ sitemap.id }}/delete"
-        hx-target="#website-detail-region"
-        hx-swap="innerHTML"
-      >
-        <button
-          type="submit"
-          class="panel-button panel-button-danger panel-button-small"
-          onclick="return confirm('Delete this sitemap?')"
-        >
-          Delete sitemap
-        </button>
-      </form>
-      {% else %}
-      <span class="text-muted">Sitemap management requires admin access</span>
-      {% endif %}
-    </li>
+      <!-- Verification Queue -->
+      <div class="bg-surface-container-low p-6 rounded-xl">
+        <div class="flex items-center justify-between mb-4">
+          <span class="flex items-center gap-2 font-headline font-bold">
+            <span class="material-symbols-outlined text-primary">rule</span>
+            Verification Queue
+          </span>
+          {% if website_eta.status == 'paused' %}
+          <span class="text-xs font-label font-bold text-on-surface-variant uppercase">Paused</span>
+          {% elif website_eta.verification_queue.eta_minutes is none %}
+          <span class="text-xs font-label font-bold text-primary uppercase">Complete</span>
+          {% elif website_eta.verification_queue.quota_remaining == 0 %}
+          <span class="text-xs font-label font-bold text-on-surface-variant uppercase">Waiting</span>
+          {% else %}
+          <span class="text-xs font-label font-bold text-primary uppercase">Analyzing</span>
+          {% endif %}
+        </div>
+        <div class="space-y-4">
+          <div class="flex justify-between items-center">
+            <span class="text-sm text-on-surface-variant">Current Backlog</span>
+            <span class="text-xl font-bold">{{ "{:,}".format(website_eta.verification_queue.queued) }} <span class="text-xs font-normal text-outline">URLs</span></span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-sm text-on-surface-variant">Processing Rate</span>
+            <span class="text-sm font-medium">{{ website_eta.verification_queue.rate_per_minute }} <span class="text-xs font-normal text-outline">URLs/min</span></span>
+          </div>
+          <div class="pt-4 border-t border-outline-variant/15 flex justify-between items-center">
+            <span class="text-sm font-bold text-on-surface">Estimated ETA</span>
+            {% if website_eta.status == 'paused' %}
+            <span class="text-lg font-extrabold text-on-surface-variant">--</span>
+            {% elif website_eta.verification_queue.eta_minutes is none %}
+            <span class="text-lg font-extrabold text-primary">Complete</span>
+            {% elif website_eta.verification_queue.quota_remaining == 0 %}
+            <span class="text-lg font-extrabold text-on-surface-variant">Waiting for quota</span>
+            {% else %}
+            <span class="text-lg font-extrabold text-primary">~{{ website_eta.verification_queue.eta_minutes }} mins</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% if website_eta.quota_reset_at %}
+    <p class="mt-6 text-xs text-on-surface-variant">Quota resets at {{ website_eta.quota_reset_at[:16] }} ET</p>
+    {% endif %}
     {% else %}
-    <li>No sitemaps configured yet.</li>
-    {% endfor %}
-  </ul>
-</section>
+    <p class="py-8 text-center text-on-surface-variant">No queue data available.</p>
+    {% endif %}
+  </div>
 
-<section class="panel">
-  <h2>Trigger indexing</h2>
-  <p>Run sitemap discovery and enqueue all discovered URLs for this website.</p>
-  {% if current_user and current_user.role == 'admin' %}
-  <form
-    action="/ui/websites/{{ website.id }}/trigger"
-    method="post"
-    hx-post="/ui/websites/{{ website.id }}/trigger"
-    hx-target="#website-detail-region"
-    hx-swap="innerHTML"
-  >
-    <button type="submit" class="panel-button">Trigger indexing</button>
-  </form>
-  {% else %}
-  <span class="text-muted">Trigger indexing requires admin access</span>
-  {% endif %}
+  <!-- Configuration Tab -->
+  <div x-show="active==='config'" x-cloak class="p-8">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-12">
+      <!-- Service Account Section -->
+      <div class="lg:col-span-2 space-y-8">
+        <div>
+          <h4 class="font-headline font-bold text-lg mb-4">Service Account</h4>
+          {% if service_account %}
+          <div class="bg-surface-container-low p-6 rounded-lg space-y-4">
+            <div>
+              <label class="block font-label text-[10px] font-bold uppercase tracking-widest text-outline mb-1">Credentials JSON Path</label>
+              <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-outline">description</span>
+                <code class="text-sm bg-white px-3 py-1 rounded border border-outline-variant/30 flex-1">{{ service_account.credentials_path }}</code>
+              </div>
+            </div>
+            <div>
+              <label class="block font-label text-[10px] font-bold uppercase tracking-widest text-outline mb-1">Active Scopes</label>
+              <div class="flex flex-wrap gap-2">
+                {% for scope in service_account.scopes %}
+                <span class="px-2 py-1 bg-surface-container-high rounded text-xs text-on-surface-variant">{{ scope }}</span>
+                {% endfor %}
+              </div>
+            </div>
+            {% if current_user and current_user.role == 'admin' %}
+            <form
+              class="inline-form"
+              action="/ui/websites/{{ website.id }}/service-account/delete"
+              method="post"
+              hx-post="/ui/websites/{{ website.id }}/service-account/delete"
+              hx-target="#website-detail-region"
+              hx-swap="innerHTML"
+            >
+              <button type="submit" class="text-error text-sm font-bold mt-2" onclick="return confirm('Delete this service account?')">Delete service account</button>
+            </form>
+            {% endif %}
+          </div>
+          {% else %}
+          {% if current_user and current_user.role == 'admin' %}
+          <form
+            class="bg-surface-container-low p-6 rounded-lg space-y-4"
+            action="/ui/websites/{{ website.id }}/service-account"
+            method="post"
+            hx-post="/ui/websites/{{ website.id }}/service-account"
+            hx-target="#website-detail-region"
+            hx-swap="innerHTML"
+          >
+            <div>
+              <label class="block font-label text-[10px] font-bold uppercase tracking-widest text-outline mb-1">Name</label>
+              <input type="text" name="name" required placeholder="Production Service Account" class="w-full bg-white border-none rounded-lg focus:ring-2 focus:ring-primary/40 text-sm py-2 px-4 shadow-sm"/>
+            </div>
+            <div>
+              <label class="block font-label text-[10px] font-bold uppercase tracking-widest text-outline mb-1">Credentials Path</label>
+              <input type="text" name="credentials_path" required placeholder="/app/service-accounts/website-service-account.json" class="w-full bg-white border-none rounded-lg focus:ring-2 focus:ring-primary/40 text-sm py-2 px-4 shadow-sm"/>
+            </div>
+            <div class="flex gap-4">
+              <label class="flex items-center gap-2 text-sm text-on-surface-variant">
+                <input type="checkbox" name="scopes" value="indexing" checked class="rounded border-outline-variant text-primary focus:ring-primary/40"/>
+                Indexing scope
+              </label>
+              <label class="flex items-center gap-2 text-sm text-on-surface-variant">
+                <input type="checkbox" name="scopes" value="webmasters" checked class="rounded border-outline-variant text-primary focus:ring-primary/40"/>
+                Webmasters scope
+              </label>
+            </div>
+            <button type="submit" class="bg-primary text-white px-6 py-2 rounded-lg font-headline font-bold text-sm active:scale-95 transition-all">Save service account</button>
+          </form>
+          {% else %}
+          <p class="text-sm text-on-surface-variant">Service account management requires admin access.</p>
+          {% endif %}
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Quota Override Form -->
+      <div class="bg-surface-container-low p-6 rounded-xl h-fit">
+        {% if current_user and current_user.role == 'admin' %}
+        <h4 class="font-headline font-bold text-lg mb-4">Quota Override</h4>
+        <p class="text-xs text-on-surface-variant mb-6">Manually restrict engine throughput for this domain.</p>
+        <form
+          class="space-y-4"
+          action="/ui/websites/{{ website.id }}/quota-edit"
+          method="post"
+          hx-post="/ui/websites/{{ website.id }}/quota-edit"
+          hx-target="#website-detail-region"
+          hx-swap="innerHTML"
+        >
+          <div>
+            <label class="block font-label text-[10px] font-bold uppercase tracking-widest text-outline mb-1">Daily Cap (URLs)</label>
+            <input type="number" name="daily_cap" value="{{ quota_status.indexing.limit }}" class="w-full bg-white border-none rounded-lg focus:ring-2 focus:ring-primary/40 text-sm py-2 px-4 shadow-sm"/>
+          </div>
+          <div>
+            <label class="block font-label text-[10px] font-bold uppercase tracking-widest text-outline mb-1">Requests / Second</label>
+            <input type="number" name="requests_per_second" value="5" class="w-full bg-white border-none rounded-lg focus:ring-2 focus:ring-primary/40 text-sm py-2 px-4 shadow-sm"/>
+          </div>
+          <button type="submit" class="w-full py-2 bg-on-surface text-white rounded-lg text-sm font-bold font-headline mt-2 hover:opacity-90 transition-opacity">Apply Override</button>
+        </form>
+        {% else %}
+        <h4 class="font-headline font-bold text-lg mb-4">Quota Override</h4>
+        <p class="text-xs text-on-surface-variant">Quota management requires admin access.</p>
+        {% endif %}
+        <div id="quota-edit-container"></div>
+      </div>
+    </div>
+  </div>
 </section>

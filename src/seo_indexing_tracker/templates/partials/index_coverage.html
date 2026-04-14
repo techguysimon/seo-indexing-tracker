@@ -1,0 +1,42 @@
+<div class="bg-surface-container-lowest p-8 rounded-xl shadow-sm flex flex-col md:flex-row items-center gap-12">
+  <div class="flex-none relative">
+    <svg class="w-48 h-48 -rotate-90">
+      <circle class="text-surface-container-high" cx="96" cy="96" fill="transparent" r="80" stroke="currentColor" stroke-width="14"></circle>
+      <circle cx="96" cy="96" fill="transparent" r="80" stroke="url(#coverage-gradient)" stroke-dasharray="502" stroke-dashoffset="{{ 502 - (502 * metrics.index_stats.coverage_percentage / 100) | round(0, 'floor') | int }}" stroke-linecap="round" stroke-width="14"></circle>
+      <defs>
+        <linearGradient id="coverage-gradient" x1="0%" x2="100%" y1="0%" y2="100%">
+          <stop offset="0%" style="stop-color:#006260"></stop>
+          <stop offset="100%" style="stop-color:#0b7d7a"></stop>
+        </linearGradient>
+      </defs>
+    </svg>
+    <div class="absolute inset-0 flex flex-col items-center justify-center">
+      <span class="font-headline text-4xl font-extrabold text-primary">{{ metrics.index_stats.coverage_percentage }}%</span>
+      <span class="font-label text-[10px] font-bold text-slate-400 uppercase tracking-wider">Indexed</span>
+    </div>
+  </div>
+  <div class="flex-1 grid grid-cols-2 md:grid-cols-4 gap-8">
+    <div class="space-y-1">
+      <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">Total Crawled</p>
+      <h4 class="font-headline text-2xl font-bold">{{ metrics.index_stats.total_urls }}</h4>
+    </div>
+    <div class="space-y-1">
+      <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">Indexed Pages</p>
+      <h4 class="font-headline text-2xl font-bold text-primary">{{ metrics.index_stats.indexed_count }}</h4>
+      <div class="h-1.5 w-full bg-surface-container-high rounded-full overflow-hidden mt-2">
+        <div class="h-full bg-primary w-[{{ metrics.index_stats.coverage_percentage }}%] rounded-full"></div>
+      </div>
+    </div>
+    <div class="space-y-1">
+      <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">Not Indexed</p>
+      <h4 class="font-headline text-2xl font-bold text-tertiary">{{ metrics.index_stats.not_indexed_count }}</h4>
+      <div class="h-1.5 w-full bg-surface-container-high rounded-full overflow-hidden mt-2">
+        <div class="h-full bg-tertiary w-[{{ 100 - metrics.index_stats.coverage_percentage }}%] rounded-full"></div>
+      </div>
+    </div>
+    <div class="space-y-1">
+      <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">Unchecked</p>
+      <h4 class="font-headline text-2xl font-bold text-on-surface">{{ metrics.index_stats.unchecked_count }}</h4>
+    </div>
+  </div>
+</div>

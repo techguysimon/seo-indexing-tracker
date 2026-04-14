@@ -2,74 +2,115 @@
 
 {% block title %}{{ page_title }} | SEO Indexing Tracker{% endblock %}
 
-{% block content %}
-<section class="hero-panel">
-  <h1>{{ page_title }}</h1>
-  <p>Associate sitemaps with websites and control which feeds stay active.</p>
-</section>
+{% block page_heading %}Sitemaps{% endblock %}
 
-<section class="panel">
-  <form class="filter-grid" action="/ui/sitemaps" method="get">
-    <label>
-      View website
-      <select name="website_id" onchange="this.form.submit()">
+{% block content %}
+<!-- Website Filter -->
+<div class="mb-8">
+  <form action="/ui/sitemaps" method="get" class="flex items-center gap-4">
+    <label class="text-xs font-bold font-label uppercase tracking-widest text-slate-500 shrink-0">Website</label>
+    <select name="website_id" onchange="this.form.submit()" class="bg-surface-container-low border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/40 text-sm font-medium text-on-surface appearance-none min-w-[240px]">
+      {% for website in websites %}
+      <option value="{{ website.id }}" {% if selected_website_id == website.id %}selected{% endif %}>
+        {{ website.domain }}
+      </option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
+<!-- Feedback -->
+{% if feedback %}
+<div class="mb-6 bg-surface-container-lowest p-4 rounded-xl border border-outline-variant/10">
+  <p class="text-sm text-on-surface-variant font-medium">{{ feedback }}</p>
+</div>
+{% endif %}
+
+<!-- Add Sitemap Form -->
+{% if current_user %}
+<div class="bg-surface-container-lowest rounded-xl p-8 mb-8 border border-outline-variant/10">
+  <form action="/ui/sitemaps" method="post" class="flex flex-col md:flex-row gap-4 items-end">
+    <div class="flex-1">
+      <label class="block text-xs font-bold font-label uppercase tracking-widest text-slate-400 mb-2">Website</label>
+      <select name="website_id" required class="w-full bg-surface-container-low border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/40 text-sm appearance-none">
         {% for website in websites %}
         <option value="{{ website.id }}" {% if selected_website_id == website.id %}selected{% endif %}>
           {{ website.domain }}
         </option>
         {% endfor %}
       </select>
-    </label>
+    </div>
+    <div class="flex-[2]">
+      <label class="block text-xs font-bold font-label uppercase tracking-widest text-slate-400 mb-2">Sitemap URL</label>
+      <input type="url" name="url" required placeholder="https://example.com/sitemap.xml" class="w-full bg-surface-container-low border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/40 text-sm" />
+    </div>
+    <div class="w-40">
+      <label class="block text-xs font-bold font-label uppercase tracking-widest text-slate-400 mb-2">Type</label>
+      <select name="sitemap_type" class="w-full bg-surface-container-low border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/40 text-sm appearance-none">
+        {% for sitemap_type in sitemap_types %}
+        <option value="{{ sitemap_type }}">{{ sitemap_type }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="bg-primary text-white px-6 py-3 rounded-xl font-headline font-bold text-sm flex items-center gap-2 shadow-sm hover:opacity-90 active:scale-95 transition-all shrink-0">
+      <span class="material-symbols-outlined text-lg">add_circle</span>
+      Add Sitemap
+    </button>
   </form>
-</section>
+</div>
+{% else %}
+<div class="bg-surface-container-lowest rounded-xl p-8 mb-8 border border-outline-variant/10">
+  <p class="text-sm text-on-surface-variant font-medium">Sign in with Google to add sitemaps.</p>
+</div>
+{% endif %}
 
-<section class="panel">
-  {% if current_user %}
-    {% if feedback %}<p class="feedback">{{ feedback }}</p>{% endif %}
-    <form class="filter-grid" action="/ui/sitemaps" method="post">
-      <label>
-        Website
-        <select name="website_id" required>
-          {% for website in websites %}
-          <option value="{{ website.id }}" {% if selected_website_id == website.id %}selected{% endif %}>
-            {{ website.domain }}
-          </option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>
-        Sitemap URL
-        <input type="url" name="url" required placeholder="https://example.com/sitemap.xml" />
-      </label>
-      <label>
-        Type
-        <select name="sitemap_type">
-          {% for sitemap_type in sitemap_types %}
-          <option value="{{ sitemap_type }}">{{ sitemap_type }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button type="submit" class="panel-button">Add sitemap</button>
-    </form>
-  {% else %}
-    <p class="feedback">Sign in with Google to add sitemaps.</p>
-  {% endif %}
-</section>
-
-<section class="panel">
-  <h2>Sitemaps</h2>
-  <ul class="data-list">
-    {% for sitemap in sitemaps %}
-    <li>
-      <strong>{{ sitemap.sitemap_type.value }}</strong>
-      <span>{{ sitemap.url }}</span>
-      <span class="pill {% if sitemap.is_active %}pill-ok{% else %}pill-dim{% endif %}">
-        {% if sitemap.is_active %}Active{% else %}Inactive{% endif %}
-      </span>
-    </li>
-    {% else %}
-    <li>No sitemaps configured for this website.</li>
-    {% endfor %}
-  </ul>
-</section>
+<!-- Sitemaps Table -->
+<div class="bg-surface-container-lowest rounded-xl overflow-hidden border border-outline-variant/10">
+  <div class="overflow-x-auto">
+    <table class="w-full text-left border-collapse">
+      <thead>
+        <tr class="bg-surface-container-low/50">
+          <th class="px-6 py-4 text-[11px] font-bold font-label uppercase tracking-widest text-slate-500">Sitemap URL</th>
+          <th class="px-6 py-4 text-[11px] font-bold font-label uppercase tracking-widest text-slate-500">Type</th>
+          <th class="px-6 py-4 text-[11px] font-bold font-label uppercase tracking-widest text-slate-500">Status</th>
+          <th class="px-6 py-4 text-[11px] font-bold font-label uppercase tracking-widest text-slate-500 text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-outline-variant/10">
+        {% for sitemap in sitemaps %}
+        <tr class="hover:bg-surface-bright transition-colors group">
+          <td class="px-6 py-5">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-surface-container-low flex items-center justify-center">
+                <span class="material-symbols-outlined text-teal-600">list_alt</span>
+              </div>
+              <span class="text-sm font-medium text-on-surface">{{ sitemap.url }}</span>
+            </div>
+          </td>
+          <td class="px-6 py-5 text-sm text-on-surface-variant">{{ sitemap.sitemap_type.value }}</td>
+          <td class="px-6 py-5">
+            <span class="px-3 py-1 rounded-full {% if sitemap.is_active %}bg-secondary-container text-on-secondary-container{% else %}bg-surface-dim text-on-surface-variant{% endif %} text-[10px] font-bold uppercase tracking-wider">
+              {% if sitemap.is_active %}Active{% else %}Inactive{% endif %}
+            </span>
+          </td>
+          <td class="px-6 py-5 text-right">
+            <button class="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all">
+              <span class="material-symbols-outlined">more_vert</span>
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4" class="px-6 py-12 text-center">
+            <div class="flex flex-col items-center gap-2">
+              <span class="material-symbols-outlined text-slate-300 text-4xl">playlist_remove</span>
+              <p class="text-sm text-slate-500 font-medium">No sitemaps configured for this website.</p>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 {% endblock %}

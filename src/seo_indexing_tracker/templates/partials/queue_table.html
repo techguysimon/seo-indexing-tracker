@@ -1,88 +1,197 @@
-<section class="panel">
-  {% if feedback %}<p class="feedback">{{ feedback }}</p>{% endif %}
+{% if feedback %}<p class="text-sm text-on-surface-variant mb-4">{{ feedback }}</p>{% endif %}
 
-  {% if current_user and current_user.role == 'admin' %}
-  <form id="batch-form" hx-post="/web/queue/batch" hx-target="#queue-table-region" hx-swap="innerHTML">
-    <input type="hidden" name="page" value="{{ queue_data.page }}" />
-    <input type="hidden" name="page_size" value="{{ filters.page_size }}" />
-    {% if filters.website_id %}<input type="hidden" name="website_id" value="{{ filters.website_id }}" />{% endif %}
-    <input type="hidden" name="queued_only" value="{{ filters.queued_only }}" />
-    <input type="hidden" name="search" value="{{ filters.search }}" />
+{% if current_user and current_user.role == 'admin' %}
+<form id="batch-form" hx-post="/web/queue/batch" hx-target="#queue-table-region" hx-swap="innerHTML">
+  <input type="hidden" name="page" value="{{ queue_data.page }}" />
+  <input type="hidden" name="page_size" value="{{ filters.page_size }}" />
+  {% if filters.website_id %}<input type="hidden" name="website_id" value="{{ filters.website_id }}" />{% endif %}
+  <input type="hidden" name="queued_only" value="{{ filters.queued_only }}" />
+  <input type="hidden" name="search" value="{{ filters.search }}" />
 
-    <div class="batch-actions">
-      <button type="submit" class="panel-button" name="action" value="enqueue">Batch enqueue</button>
-      <button type="submit" class="panel-button panel-button-ghost" name="action" value="recalculate">Recalculate</button>
-      <button type="submit" class="panel-button panel-button-danger" name="action" value="remove">Batch remove</button>
+  <!-- Sticky Batch Action Bar -->
+  <div class="sticky top-[72px] z-40 mb-4 h-0 overflow-visible pointer-events-none" id="batch-bar">
+    <div class="bg-inverse-surface text-inverse-on-surface px-6 py-3 rounded-xl shadow-xl flex items-center justify-between w-full pointer-events-auto border border-white/10 backdrop-blur-md">
+      <div class="flex items-center gap-4">
+        <div class="w-6 h-6 bg-primary rounded flex items-center justify-center">
+          <span class="material-symbols-outlined text-sm">check</span>
+        </div>
+        <span class="font-headline font-bold text-sm tracking-tight" id="selected-count">0 URLs Selected</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="submit" name="action" value="enqueue" class="px-4 py-1.5 text-xs font-bold hover:bg-white/10 rounded-lg transition-colors flex items-center gap-2">
+          <span class="material-symbols-outlined text-sm">backup</span>
+          Batch Enqueue
+        </button>
+        <button type="submit" name="action" value="recalculate" class="px-4 py-1.5 text-xs font-bold hover:bg-white/10 rounded-lg transition-colors flex items-center gap-2">
+          <span class="material-symbols-outlined text-sm">refresh</span>
+          Recalculate Priority
+        </button>
+        <button type="submit" name="action" value="remove" class="px-4 py-1.5 text-xs font-bold hover:bg-error/20 text-red-300 rounded-lg transition-colors flex items-center gap-2">
+          <span class="material-symbols-outlined text-sm">delete</span>
+          Remove
+        </button>
+        <div class="w-px h-6 bg-white/10 mx-2"></div>
+        <button type="submit" name="action" value="export_csv" class="px-4 py-1.5 bg-white text-on-surface text-xs font-bold rounded-lg hover:bg-surface-bright transition-colors flex items-center gap-2">
+          <span class="material-symbols-outlined text-sm">download</span>
+          Export CSV
+        </button>
+      </div>
     </div>
-  </form>
-  {% else %}
-  <p class="feedback feedback-info">Batch actions require admin access.</p>
-  {% endif %}
+  </div>
+</form>
+{% endif %}
 
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th></th>
-          <th>Website</th>
-          <th>URL</th>
-          <th>Priority</th>
-          <th>Override</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in queue_data['items'] %}
-        <tr>
-          <td><input type="checkbox" name="url_ids" value="{{ item.id }}" form="batch-form" /></td>
-          <td>{{ item.website_domain }}</td>
-          <td class="url-cell">{{ item.url }}</td>
-          <td>{{ "%.2f" | format(item.current_priority) }}</td>
-          <td>{% if item.manual_priority_override is none %}-{% else %}{{ "%.2f" | format(item.manual_priority_override) }}{% endif %}</td>
-          <td>
+<!-- Data Table -->
+<div class="bg-surface-container-lowest rounded-2xl overflow-hidden shadow-sm border border-outline-variant/10">
+  <table class="w-full text-left border-collapse">
+    <thead>
+      <tr class="bg-surface-container-low/50">
+        <th class="py-4 px-6 w-10">
+          <input type="checkbox" class="rounded border-outline-variant text-primary focus:ring-primary/20 w-4 h-4" id="select-all-checkbox" />
+        </th>
+        <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4">URL Path</th>
+        <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4">Status</th>
+        <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4 w-48">Priority Pulse</th>
+        <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4">Last Crawl</th>
+        <th class="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant py-4 px-4 text-right">Actions</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-outline-variant/10">
+      {% for item in queue_data['items'] %}
+      <tr class="hover:bg-surface-container-low/30 transition-colors group">
+        <td class="py-4 px-6">
+          <input type="checkbox" name="url_ids" value="{{ item.id }}" form="batch-form" class="rounded border-outline-variant text-primary focus:ring-primary/20 w-4 h-4 url-checkbox" />
+        </td>
+        <td class="py-4 px-4">
+          <span class="text-sm font-medium text-on-surface truncate max-w-xs cursor-help" title="{{ item.url }}">{{ item.url | truncate(35, True, '...') }}</span>
+        </td>
+        <td class="py-4 px-4">
+          {% set status = item.status | default('UNKNOWN') | upper %}
+          {% if status == 'INDEXED' %}
+          <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-secondary-container text-on-secondary-container inline-flex items-center gap-1">
+            <span class="w-1 h-1 rounded-full bg-secondary"></span>
+            INDEXED
+          </span>
+          {% elif status == 'ERROR' or '404' in status %}
+          <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-error-container text-on-error-container inline-flex items-center gap-1">
+            <span class="w-1 h-1 rounded-full bg-error"></span>
+            {{ status }}
+          </span>
+          {% elif status == 'QUEUED' %}
+          <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-tertiary-fixed text-on-tertiary-fixed-variant inline-flex items-center gap-1">
+            <span class="w-1 h-1 rounded-full bg-tertiary"></span>
+            QUEUED
+          </span>
+          {% else %}
+          <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-surface-container-high text-on-surface-variant inline-flex items-center gap-1">
+            <span class="w-1 h-1 rounded-full bg-outline"></span>
+            NOT INDEXED
+          </span>
+          {% endif %}
+        </td>
+        <td class="py-4 px-4">
+          {% set pct = (item.current_priority * 100) | int %}
+          <div class="flex items-center gap-3">
+            <div class="flex-1 h-1.5 bg-surface-container-high rounded-full overflow-hidden">
+              <div class="h-full bg-gradient-to-r from-primary to-primary-container" style="width: {{ pct }}%"></div>
+            </div>
+            <span class="text-xs font-bold text-primary w-8">{{ "%.2f" | format(item.current_priority) }}</span>
             {% if current_user and current_user.role == 'admin' %}
-            <form class="inline-form" hx-post="/web/queue/priority/{{ item.id }}" hx-target="#queue-table-region" hx-swap="innerHTML">
-              <input type="number" min="0" max="1" step="0.01" name="priority" value="{{ "%.2f" | format(item.current_priority) }}" />
+            <div class="opacity-0 group-hover:opacity-100 transition-opacity priority-edit-wrap">
+              <form class="flex items-center gap-1" hx-post="/web/queue/priority/{{ item.id }}" hx-target="#queue-table-region" hx-swap="innerHTML">
+                <input type="number" min="0" max="1" step="0.01" name="priority" value="{{ "%.2f" | format(item.current_priority) }}" class="w-16 bg-surface-container-high border-none rounded text-xs py-1 px-2 focus:ring-2 focus:ring-primary/20" />
+                <input type="hidden" name="page" value="{{ queue_data.page }}" />
+                <input type="hidden" name="page_size" value="{{ filters.page_size }}" />
+                {% if filters.website_id %}<input type="hidden" name="website_id" value="{{ filters.website_id }}" />{% endif %}
+                <input type="hidden" name="queued_only" value="{{ filters.queued_only }}" />
+                <input type="hidden" name="search" value="{{ filters.search }}" />
+                <button type="submit" class="p-1 hover:bg-surface-container-high rounded text-primary">
+                  <span class="material-symbols-outlined text-sm">check</span>
+                </button>
+              </form>
+            </div>
+            {% endif %}
+          </div>
+        </td>
+        <td class="py-4 px-4">
+          {% if item.last_crawl_at %}
+          <span class="text-xs text-on-surface-variant">{{ item.last_crawl_at | humanize_date }}</span>
+          {% else %}
+          <span class="text-xs text-on-surface-variant">Pending</span>
+          {% endif %}
+        </td>
+        <td class="py-4 px-4 text-right">
+          <div class="flex items-center justify-end gap-2">
+            <a href="{{ item.url }}" target="_blank" class="p-2 text-slate-400 hover:text-primary transition-colors">
+              <span class="material-symbols-outlined text-xl">search</span>
+            </a>
+            {% if current_user and current_user.role == 'admin' %}
+            <form class="inline" hx-post="/web/queue/submit/{{ item.id }}" hx-target="#queue-table-region" hx-swap="innerHTML">
               <input type="hidden" name="page" value="{{ queue_data.page }}" />
               <input type="hidden" name="page_size" value="{{ filters.page_size }}" />
               {% if filters.website_id %}<input type="hidden" name="website_id" value="{{ filters.website_id }}" />{% endif %}
               <input type="hidden" name="queued_only" value="{{ filters.queued_only }}" />
               <input type="hidden" name="search" value="{{ filters.search }}" />
-              <button class="panel-button panel-button-small" type="submit">Apply</button>
+              <button type="submit" class="p-2 text-slate-400 hover:text-primary transition-colors">
+                <span class="material-symbols-outlined text-xl">upload</span>
+              </button>
             </form>
             {% endif %}
-          </td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="6">No queue items match this filter.</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="6" class="py-12 text-center text-on-surface-variant text-sm">No queue items match this filter.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 
-  <div class="pagination-row">
-    <span>Page {{ queue_data.page }} of {{ queue_data.total_pages }}</span>
-    <div>
-      {% if queue_data.page > 1 %}
-      <button
-        class="panel-button panel-button-small"
-        hx-get="/web/partials/queue-table?page={{ queue_data.page - 1 }}&page_size={{ filters.page_size }}&queued_only={{ filters.queued_only }}&search={{ filters.search }}{% if filters.website_id %}&website_id={{ filters.website_id }}{% endif %}"
-        hx-target="#queue-table-region"
-      >
-        Previous
-      </button>
-      {% endif %}
-      {% if queue_data.page < queue_data.total_pages %}
-      <button
-        class="panel-button panel-button-small"
-        hx-get="/web/partials/queue-table?page={{ queue_data.page + 1 }}&page_size={{ filters.page_size }}&queued_only={{ filters.queued_only }}&search={{ filters.search }}{% if filters.website_id %}&website_id={{ filters.website_id }}{% endif %}"
-        hx-target="#queue-table-region"
-      >
-        Next
-      </button>
-      {% endif %}
+  <!-- Pagination Footer -->
+  <div class="flex items-center justify-between px-6 py-5 bg-surface-container-low/30">
+    <div class="flex items-center gap-4">
+      <span class="text-xs text-on-surface-variant font-medium">Rows per page:</span>
+      <select class="bg-transparent border-none text-xs font-bold py-1 px-2 focus:ring-0 cursor-pointer" hx-get="/web/partials/queue-table" hx-target="#queue-table-region" hx-swap="innerHTML" name="page_size" onchange="this.closest('form')||this.form&&this.form.submit()">
+        <option value="25" {% if filters.page_size == 25 %}selected{% endif %}>25</option>
+        <option value="50" {% if filters.page_size == 50 %}selected{% endif %}>50</option>
+        <option value="100" {% if filters.page_size == 100 %}selected{% endif %}>100</option>
+      </select>
+    </div>
+    <div class="flex items-center gap-6">
+      <span class="text-xs font-bold text-on-surface">
+        {% set start = ((queue_data.page - 1) * filters.page_size) + 1 %}
+        {% set end = [queue_data.page * filters.page_size, queue_data.total_items] | min %}
+        {{ start }}-{{ end }} of {{ queue_data.total_items }}
+      </span>
+      <div class="flex items-center gap-1">
+        {% if queue_data.page > 1 %}
+        <button
+          class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-container-high transition-colors text-on-surface"
+          hx-get="/web/partials/queue-table?page={{ queue_data.page - 1 }}&page_size={{ filters.page_size }}&queued_only={{ filters.queued_only }}&search={{ filters.search }}{% if filters.website_id %}&website_id={{ filters.website_id }}{% endif %}"
+          hx-target="#queue-table-region"
+        >
+          <span class="material-symbols-outlined">chevron_left</span>
+        </button>
+        {% else %}
+        <button class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 disabled:opacity-30" disabled>
+          <span class="material-symbols-outlined">chevron_left</span>
+        </button>
+        {% endif %}
+        {% if queue_data.page < queue_data.total_pages %}
+        <button
+          class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-container-high transition-colors text-on-surface"
+          hx-get="/web/partials/queue-table?page={{ queue_data.page + 1 }}&page_size={{ filters.page_size }}&queued_only={{ filters.queued_only }}&search={{ filters.search }}{% if filters.website_id %}&website_id={{ filters.website_id }}{% endif %}"
+          hx-target="#queue-table-region"
+        >
+          <span class="material-symbols-outlined">chevron_right</span>
+        </button>
+        {% else %}
+        <button class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 disabled:opacity-30" disabled>
+          <span class="material-symbols-outlined">chevron_right</span>
+        </button>
+        {% endif %}
+      </div>
     </div>
   </div>
-</section>
+</div>

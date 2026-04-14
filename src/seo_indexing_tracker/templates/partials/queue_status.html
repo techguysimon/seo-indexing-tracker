@@ -1,11 +1,27 @@
-<div class="panel status-panel">
-  <h2>Live queue status</h2>
-  <div class="status-row">
-    <span>Queued now</span>
-    <strong>{{ queued_count }}</strong>
+<div class="bg-surface-container-low p-6 rounded-xl space-y-6">
+  <h3 class="font-headline text-md font-bold text-on-surface flex items-center gap-2">
+    <span class="material-symbols-outlined text-primary">bolt</span>
+    Live Queue Status
+  </h3>
+  <div class="space-y-4">
+    <div class="bg-surface-container-lowest p-4 rounded-lg flex items-center justify-between">
+      <div>
+        <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">Queued Now</p>
+        <h4 class="font-headline text-xl font-extrabold text-primary">{{ queued_count }}</h4>
+      </div>
+      <div class="w-10 h-1 bg-primary rounded-full"></div>
+    </div>
+    <div class="bg-surface-container-lowest p-4 rounded-lg flex items-center justify-between">
+      <div>
+        <p class="font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">High Priority</p>
+        <h4 class="font-headline text-xl font-extrabold text-on-surface">{{ high_priority_count }}</h4>
+      </div>
+      <div class="w-10 h-1 bg-surface-dim rounded-full"></div>
+    </div>
   </div>
-  <div class="status-row">
-    <span>Priority 0.8+</span>
-    <strong>{{ high_priority_count }}</strong>
+  <div class="bg-primary/5 p-4 rounded-lg border border-primary/10">
+    <p class="text-[11px] leading-relaxed text-primary-container font-medium">
+      Queue throughput is currently <strong class="font-bold">processing</strong>. High priority items are handled first.
+    </p>
   </div>
 </div>

@@ -1,45 +1,47 @@
 {% if saved %}
-<div class="alert alert-success">
+<div class="bg-primary-container/20 text-primary rounded-lg p-4 mb-4 text-sm font-bold">
   Quota updated successfully!
 </div>
 {% endif %}
 
-<form 
-  hx-post="/ui/websites/{{ website.id }}/quota-override"
-  hx-target="#quota-edit-container"
-  hx-swap="innerHTML"
-  class="quota-form"
->
-  <h4>Manual Quota Override</h4>
-  
-  <div class="form-row">
-    <label>
-      Indexing API Limit
-      <input type="number" name="indexing_limit" value="{{ quota_status.indexing.limit }}" min="1">
-    </label>
-    <label>
-      Used Today
-      <input type="number" name="indexing_used" value="{{ quota_status.indexing.used }}" min="0">
-    </label>
-  </div>
-  
-  <div class="form-row">
-    <label>
-      Inspection API Limit
-      <input type="number" name="inspection_limit" value="{{ quota_status.inspection.limit }}" min="1">
-    </label>
-    <label>
-      Used Today
-      <input type="number" name="inspection_used" value="{{ quota_status.inspection.used }}" min="0">
-    </label>
-  </div>
-  
-  <div class="form-row">
-    <label class="checkbox-label">
-      <input type="checkbox" name="mode" value="auto">
-      Reset to auto-discovery mode
-    </label>
-  </div>
-  
-  <button type="submit" class="btn btn-primary">Save</button>
-</form>
+<div class="bg-surface-container-low p-6 rounded-xl">
+  <form
+    hx-post="/ui/websites/{{ website.id }}/quota-override"
+    hx-target="#quota-edit-container"
+    hx-swap="innerHTML"
+    class="space-y-6"
+  >
+    <h4 class="font-headline font-bold text-lg mb-4">Manual Quota Override</h4>
+
+    <div class="grid grid-cols-2 gap-4">
+      <label class="block font-label text-[10px] font-bold uppercase tracking-widest text-outline mb-1">
+        Indexing API Limit
+        <input type="number" name="indexing_limit" value="{{ quota_status.indexing.limit }}" min="1" class="w-full bg-white border-none rounded-lg focus:ring-2 focus:ring-primary/40 text-sm py-2 px-4 shadow-sm">
+      </label>
+      <label class="block font-label text-[10px] font-bold uppercase tracking-widest text-outline mb-1">
+        Used Today
+        <input type="number" name="indexing_used" value="{{ quota_status.indexing.used }}" min="0" class="w-full bg-white border-none rounded-lg focus:ring-2 focus:ring-primary/40 text-sm py-2 px-4 shadow-sm">
+      </label>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <label class="block font-label text-[10px] font-bold uppercase tracking-widest text-outline mb-1">
+        Inspection API Limit
+        <input type="number" name="inspection_limit" value="{{ quota_status.inspection.limit }}" min="1" class="w-full bg-white border-none rounded-lg focus:ring-2 focus:ring-primary/40 text-sm py-2 px-4 shadow-sm">
+      </label>
+      <label class="block font-label text-[10px] font-bold uppercase tracking-widest text-outline mb-1">
+        Used Today
+        <input type="number" name="inspection_used" value="{{ quota_status.inspection.used }}" min="0" class="w-full bg-white border-none rounded-lg focus:ring-2 focus:ring-primary/40 text-sm py-2 px-4 shadow-sm">
+      </label>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="mode" value="auto">
+        Reset to auto-discovery mode
+      </label>
+    </div>
+
+    <button type="submit" class="w-full py-2.5 bg-on-surface text-white rounded-lg text-sm font-bold font-headline hover:opacity-90">Save</button>
+  </form>
+</div>

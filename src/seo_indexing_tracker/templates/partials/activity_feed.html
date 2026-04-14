@@ -1,14 +1,40 @@
-<div class="panel chart-panel">
-  <h2>Recent activity</h2>
-  <ul class="data-list">
+<div class="bg-surface-container-lowest p-8 rounded-xl shadow-sm">
+  <h3 class="font-headline text-lg font-bold text-on-surface mb-8">Activity Feed</h3>
+  <div class="space-y-6">
     {% for event in activities %}
-    <li>
-      <strong>{{ event.event_type }}</strong>
-      <span>{{ event.message }}</span>
-      <span>{{ event.website_domain }} - {{ event.created_at.isoformat() }}</span>
-    </li>
+    <div class="flex gap-4">
+      <div class="flex-none w-8 h-8 rounded-full flex items-center justify-center
+        {% if event.event_type == 'rate_limit' %}bg-error-container text-error
+        {% elif event.event_type == 'verified' or event.event_type == 'success' %}bg-secondary-container text-secondary
+        {% else %}bg-primary-container text-on-primary-container{% endif %}">
+        <span class="material-symbols-outlined text-sm">
+          {% if event.event_type == 'rate_limit' %}warning
+          {% elif event.event_type == 'verified' or event.event_type == 'success' %}check_circle
+          {% elif event.event_type == 'sitemap' %}cloud_upload
+          {% else %}info{% endif %}
+        </span>
+      </div>
+      <div class="flex-1">
+        <div class="flex justify-between items-start">
+          <p class="text-sm font-semibold text-on-surface">{{ event.event_type }}</p>
+          <span class="text-[10px] text-slate-400">{{ event.created_at.isoformat() }}</span>
+        </div>
+        <p class="text-[11px] text-slate-500 mb-2">{{ event.message }}</p>
+        {% if event.website_domain %}
+        <span class="px-2 py-0.5 bg-surface-container text-on-surface-variant text-[9px] font-bold rounded uppercase">{{ event.website_domain }}</span>
+        {% endif %}
+      </div>
+    </div>
     {% else %}
-    <li>No activity yet.</li>
+    <div class="flex gap-4">
+      <div class="flex-none w-8 h-8 rounded-full bg-surface-container text-on-surface-variant flex items-center justify-center">
+        <span class="material-symbols-outlined text-sm">info</span>
+      </div>
+      <div class="flex-1">
+        <p class="text-sm font-semibold text-on-surface">No activity yet</p>
+        <p class="text-[11px] text-slate-500">Events will appear here as they occur.</p>
+      </div>
+    </div>
     {% endfor %}
-  </ul>
+  </div>
 </div>
