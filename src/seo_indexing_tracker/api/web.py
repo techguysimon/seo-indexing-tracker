@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 import logging
-from math import ceil
-from typing import Any, TypedDict
 from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Select, func, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from seo_indexing_tracker.database import get_db_session
 from seo_indexing_tracker.api.urls import (
@@ -33,20 +30,15 @@ from seo_indexing_tracker.utils.form_helpers import (
     _form_uuid,
 )
 from seo_indexing_tracker.models import (
-    ActivityLog,
-    IndexStatus,
-    JobExecution,
     QuotaUsage,
     ServiceAccount,
     Sitemap,
-    SitemapRefreshProgress,
     SitemapType,
     URL,
     URLIndexStatus,
     Website,
 )
 from seo_indexing_tracker.models.website import QuotaDiscoveryStatus
-from seo_indexing_tracker.services.index_stats_service import IndexStatsService
 from seo_indexing_tracker.services.activity_service import ActivityService
 from seo_indexing_tracker.services.url_inspection_service import (
     inspect_single_url as inspect_single_url_service,
@@ -61,6 +53,9 @@ from seo_indexing_tracker.services.config_validation import (
 
 from seo_indexing_tracker.services.quota_discovery_service import QuotaDiscoveryService
 from seo_indexing_tracker.services.queue_eta_service import QueueETAService
+from seo_indexing_tracker.services.website_detail_service import (
+    build_website_detail_context,
+)
 from seo_indexing_tracker.services.priority_queue import PriorityQueueService
 from seo_indexing_tracker.services.sitemap_fetcher import (
     SitemapFetchError,
@@ -78,10 +73,17 @@ from seo_indexing_tracker.services.trigger_indexing_service import (
     TriggerIndexingService,
     URLDiscoveryProcessingException,
 )
-from seo_indexing_tracker.services.processing_pipeline import (
-    INDEX_VERIFICATION_JOB_ID,
-    SITEMAP_REFRESH_JOB_ID,
-    URL_SUBMISSION_JOB_ID,
+from seo_indexing_tracker.services.queue_template_service import (
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    _fetch_queue_rows,
+    _query_filters,
+    _table_context,
+)
+from seo_indexing_tracker.services.dashboard_service import (
+    _build_system_status_context,
+    _fetch_dashboard_metrics,
+    _fetch_recent_activity,
 )
 
 
@@ -91,17 +93,7 @@ _config_validation_service = ConfigurationValidationService()
 _quota_discovery_service = QuotaDiscoveryService()
 _activity_service = ActivityService()
 _trigger_logger = logging.getLogger("seo_indexing_tracker.web.trigger_indexing")
-_DEFAULT_PAGE_SIZE = 12
-_MAX_PAGE_SIZE = 100
 _ALLOWED_SERVICE_ACCOUNT_SCOPES = frozenset({"indexing", "webmasters"})
-
-
-class QueueFilters(TypedDict):
-    page: int
-    page_size: int
-    website_id: UUID | None
-    queued_only: bool
-    search: str
 
 
 def _get_templates(request: Request) -> Jinja2Templates:
@@ -109,10 +101,6 @@ def _get_templates(request: Request) -> Jinja2Templates:
     if isinstance(templates, Jinja2Templates):
         return templates
     raise RuntimeError("Template engine is not configured on application state.")
-
-
-def _safe_page_size(value: int) -> int:
-    return min(max(value, 1), _MAX_PAGE_SIZE)
 
 
 def _safe_sitemap_url_for_feedback(url: str | None) -> str:
@@ -213,248 +201,6 @@ def _normalize_scopes(scopes: list[str]) -> list[str]:
     return unique_scopes
 
 
-def _query_filters(
-    *,
-    page: int,
-    page_size: int,
-    website_id: UUID | None,
-    queued_only: bool,
-    search: str,
-) -> QueueFilters:
-    return {
-        "page": max(page, 1),
-        "page_size": _safe_page_size(page_size),
-        "website_id": website_id,
-        "queued_only": queued_only,
-        "search": search.strip(),
-    }
-
-
-def _format_next_run_by_job(request: Request) -> dict[str, str]:
-    scheduler = getattr(request.app.state, "scheduler_service", None)
-    if scheduler is None or not getattr(scheduler, "enabled", False):
-        return {
-            "url_submission": "Scheduler disabled",
-            "index_verification": "Scheduler disabled",
-            "sitemap_refresh": "Scheduler disabled",
-        }
-
-    try:
-        scheduler_jobs = scheduler.list_jobs()
-    except RuntimeError:
-        return {
-            "url_submission": "Unavailable",
-            "index_verification": "Unavailable",
-            "sitemap_refresh": "Unavailable",
-        }
-
-    next_run_by_job_id = {
-        job.job_id: job.next_run_time.isoformat() if job.next_run_time else "Paused"
-        for job in scheduler_jobs
-    }
-    return {
-        "url_submission": next_run_by_job_id.get(
-            URL_SUBMISSION_JOB_ID, "Not registered"
-        ),
-        "index_verification": next_run_by_job_id.get(
-            INDEX_VERIFICATION_JOB_ID,
-            "Not registered",
-        ),
-        "sitemap_refresh": next_run_by_job_id.get(
-            SITEMAP_REFRESH_JOB_ID, "Not registered"
-        ),
-    }
-
-
-async def _fetch_dashboard_metrics(
-    *,
-    request: Request,
-    session: AsyncSession,
-) -> dict[str, object]:
-    queued_urls = int(
-        (
-            await session.scalar(
-                select(func.count()).select_from(URL).where(URL.current_priority > 0)
-            )
-        )
-        or 0
-    )
-    manual_overrides = int(
-        (
-            await session.scalar(
-                select(func.count())
-                .select_from(URL)
-                .where(URL.manual_priority_override.is_not(None))
-            )
-        )
-        or 0
-    )
-    active_websites = int(
-        (
-            await session.scalar(
-                select(func.count())
-                .select_from(Website)
-                .where(Website.is_active.is_(True))
-            )
-        )
-        or 0
-    )
-    tracked_urls = int(
-        (await session.scalar(select(func.count()).select_from(URL))) or 0
-    )
-
-    queue_by_website_result = await session.execute(
-        select(
-            Website.domain,
-            func.count(URL.id).label("queued_count"),
-            func.avg(URL.current_priority).label("average_priority"),
-        )
-        .join(URL, URL.website_id == Website.id)
-        .where(URL.current_priority > 0)
-        .group_by(Website.domain)
-        .order_by(func.count(URL.id).desc(), Website.domain.asc())
-        .limit(6)
-    )
-    queue_by_website = [
-        {
-            "domain": row.domain,
-            "queued_count": int(row.queued_count or 0),
-            "average_priority": float(row.average_priority or 0.0),
-        }
-        for row in queue_by_website_result
-    ]
-
-    index_stats = await IndexStatsService.get_dashboard_index_stats(session=session)
-
-    return {
-        "queued_urls": queued_urls,
-        "manual_overrides": manual_overrides,
-        "active_websites": active_websites,
-        "tracked_urls": tracked_urls,
-        "queue_by_website": queue_by_website,
-        "index_stats": index_stats,
-        "next_scheduled_runs": _format_next_run_by_job(request),
-    }
-
-
-async def _fetch_recent_activity(
-    *,
-    session: AsyncSession,
-    limit: int = 20,
-) -> list[dict[str, object]]:
-    rows = (
-        await session.execute(
-            select(ActivityLog, Website.domain)
-            .outerjoin(Website, Website.id == ActivityLog.website_id)
-            .order_by(ActivityLog.created_at.desc())
-            .limit(limit)
-        )
-    ).all()
-    return [
-        {
-            "id": row[0].id,
-            "event_type": row[0].event_type,
-            "message": row[0].message,
-            "website_id": row[0].website_id,
-            "website_domain": row[1] or "Global",
-            "created_at": row[0].created_at,
-        }
-        for row in rows
-    ]
-
-
-async def _build_system_status_context(
-    *,
-    request: Request,
-    session: AsyncSession,
-) -> dict[str, object]:
-    running_rows = (
-        (
-            await session.execute(
-                select(JobExecution)
-                .where(JobExecution.status == "running")
-                .order_by(JobExecution.started_at.desc())
-            )
-        )
-        .scalars()
-        .all()
-    )
-    running_jobs = [
-        {
-            "job_id": row.job_id,
-            "job_name": row.job_name,
-            "started_at": row.started_at,
-            "urls_processed": row.urls_processed,
-            "checkpoint_data": row.checkpoint_data,
-        }
-        for row in running_rows
-    ]
-    has_running_jobs = bool(running_jobs)
-    return {
-        "running_jobs": running_jobs,
-        "next_scheduled_runs": _format_next_run_by_job(request),
-        "refresh_trigger": "load, every 10s" if has_running_jobs else "load, every 30s",
-    }
-
-
-def _base_queue_statement(*, filters: QueueFilters) -> Select[tuple[URL, str]]:
-    statement = select(URL, Website.domain).join(Website, Website.id == URL.website_id)
-    website_id = filters["website_id"]
-    if website_id is not None:
-        statement = statement.where(URL.website_id == website_id)
-
-    if filters["queued_only"]:
-        statement = statement.where(URL.current_priority > 0)
-
-    search = filters["search"]
-    if search:
-        statement = statement.where(URL.url.ilike(f"%{search}%"))
-
-    return statement
-
-
-async def _fetch_queue_rows(
-    *,
-    session: AsyncSession,
-    filters: QueueFilters,
-) -> dict[str, object]:
-    page = filters["page"]
-    page_size = filters["page_size"]
-    base_statement = _base_queue_statement(filters=filters)
-
-    count_statement = select(func.count()).select_from(base_statement.subquery())
-    total_items = int((await session.scalar(count_statement)) or 0)
-    total_pages = max(1, ceil(total_items / page_size))
-    safe_page = min(page, total_pages)
-
-    rows = await session.execute(
-        base_statement.order_by(URL.current_priority.desc(), URL.updated_at.desc())
-        .offset((safe_page - 1) * page_size)
-        .limit(page_size)
-    )
-
-    items = [
-        {
-            "id": row[0].id,
-            "website_id": row[0].website_id,
-            "website_domain": row[1],
-            "url": row[0].url,
-            "current_priority": row[0].current_priority,
-            "manual_priority_override": row[0].manual_priority_override,
-            "updated_at": row[0].updated_at,
-        }
-        for row in rows.all()
-    ]
-
-    return {
-        "items": items,
-        "page": safe_page,
-        "page_size": page_size,
-        "total_items": total_items,
-        "total_pages": total_pages,
-    }
-
-
 async def _fetch_websites(session: AsyncSession) -> list[Website]:
     result = await session.scalars(select(Website).order_by(Website.domain.asc()))
     return list(result)
@@ -476,77 +222,6 @@ async def _fetch_sitemaps(
     return list(result)
 
 
-async def _fetch_website_with_details(
-    *,
-    session: AsyncSession,
-    website_id: UUID,
-) -> Website | None:
-    statement = (
-        select(Website)
-        .where(Website.id == website_id)
-        .options(
-            selectinload(Website.service_account),
-            selectinload(Website.sitemaps),
-        )
-    )
-    website: Website | None = await session.scalar(statement)
-    return website
-
-
-async def _fetch_sitemap_progress_by_sitemap_ids(
-    *,
-    session: AsyncSession,
-    sitemap_ids: list[UUID],
-) -> dict[UUID, SitemapRefreshProgress]:
-    """Fetch progress records indexed by sitemap ID."""
-    if not sitemap_ids:
-        return {}
-
-    rows = (
-        (
-            await session.execute(
-                select(SitemapRefreshProgress).where(
-                    SitemapRefreshProgress.sitemap_id.in_(sitemap_ids)
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-
-    return {row.sitemap_id: row for row in rows}
-
-
-async def _get_website_eta_context(
-    session: AsyncSession, website_id: UUID
-) -> dict[str, Any] | None:
-    """Get ETA data for a specific website."""
-    eta_service = QueueETAService(session)
-    eta = await eta_service.get_website_eta(website_id)
-    if eta is None:
-        return None
-    return {
-        "website_id": str(eta.website_id),
-        "website_domain": eta.website_domain,
-        "status": eta.status,
-        "submission_queue": {
-            "queued": eta.submission_queue.queued,
-            "quota_remaining": eta.submission_queue.quota_remaining,
-            "quota_limit": eta.submission_queue.quota_limit,
-            "eta_minutes": eta.submission_queue.eta_minutes,
-            "rate_per_minute": round(eta.submission_queue.rate_per_minute, 1),
-        },
-        "verification_queue": {
-            "queued": eta.verification_queue.queued,
-            "quota_remaining": eta.verification_queue.quota_remaining,
-            "quota_limit": eta.verification_queue.quota_limit,
-            "eta_minutes": eta.verification_queue.eta_minutes,
-            "rate_per_minute": round(eta.verification_queue.rate_per_minute, 1),
-        },
-        "quota_reset_at": eta.quota_reset_at.isoformat(),
-    }
-
-
 async def _render_website_detail(
     *,
     request: Request,
@@ -555,42 +230,11 @@ async def _render_website_detail(
     feedback: str | None,
 ) -> Response:
     templates = _get_templates(request)
-    website = await _fetch_website_with_details(session=session, website_id=website_id)
-    if website is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Website not found",
-        )
-
-    sitemaps = sorted(
-        website.sitemaps,
-        key=lambda sitemap: sitemap.created_at,
-        reverse=True,
-    )
-    sitemap_ids = [s.id for s in sitemaps]
-    sitemap_progress = await _fetch_sitemap_progress_by_sitemap_ids(
+    context = await build_website_detail_context(
         session=session,
-        sitemap_ids=sitemap_ids,
+        website_id=website_id,
+        feedback=feedback,
     )
-
-    context = {
-        "page_title": f"{website.domain} Setup",
-        "website": website,
-        "service_account": website.service_account,
-        "sitemaps": sitemaps,
-        "sitemap_progress": sitemap_progress,
-        "sitemap_types": [SitemapType.URLSET.value, SitemapType.INDEX.value],
-        "feedback": feedback,
-        "index_stats": await IndexStatsService.get_website_index_stats(
-            session=session,
-            website_id=website_id,
-        ),
-        "quota_status": await _quota_discovery_service.get_discovered_limits(
-            session=session,
-            website_id=website_id,
-        ),
-        "website_eta": await _get_website_eta_context(session, website_id),
-    }
     template_name = (
         "partials/website_detail_panel.html"
         if _is_htmx_request(request)
@@ -617,21 +261,6 @@ async def _rollback_and_render_website_detail(
         website_id=website_id,
         feedback=feedback,
     )
-
-
-def _table_context(
-    *,
-    filters: QueueFilters,
-    queue_data: dict[str, object],
-    websites: Iterable[Website],
-    feedback: str | None,
-) -> dict[str, object]:
-    return {
-        "filters": filters,
-        "queue_data": queue_data,
-        "websites": list(websites),
-        "feedback": feedback,
-    }
 
 
 @router.get("/", response_class=Response)
@@ -768,7 +397,7 @@ async def queue_status_partial(
 async def queue_management(
     request: Request,
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=_DEFAULT_PAGE_SIZE, ge=1, le=_MAX_PAGE_SIZE),
+    page_size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     website_id: UUID | None = Query(default=None),
     queued_only: bool = Query(default=True),
     search: str = Query(default=""),
@@ -804,7 +433,7 @@ async def queue_management(
 async def queue_table_partial(
     request: Request,
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=_DEFAULT_PAGE_SIZE, ge=1, le=_MAX_PAGE_SIZE),
+    page_size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     website_id: UUID | None = Query(default=None),
     queued_only: bool = Query(default=True),
     search: str = Query(default=""),
@@ -842,7 +471,7 @@ async def queue_priority_action(
     form_data = await request.form()
     priority = _form_float(form_data.get("priority"), default=0.5)
     page = _form_int(form_data.get("page"), default=1)
-    page_size = _form_int(form_data.get("page_size"), default=_DEFAULT_PAGE_SIZE)
+    page_size = _form_int(form_data.get("page_size"), default=DEFAULT_PAGE_SIZE)
     website_id = _form_uuid(form_data.get("website_id"))
     queued_only = _form_bool(form_data.get("queued_only"), default=True)
     search = str(form_data.get("search") or "")
@@ -887,7 +516,7 @@ async def queue_batch_action(
     form_data = await request.form()
     action = str(form_data.get("action") or "")
     page = _form_int(form_data.get("page"), default=1)
-    page_size = _form_int(form_data.get("page_size"), default=_DEFAULT_PAGE_SIZE)
+    page_size = _form_int(form_data.get("page_size"), default=DEFAULT_PAGE_SIZE)
     website_id = _form_uuid(form_data.get("website_id"))
     queued_only = _form_bool(form_data.get("queued_only"), default=True)
     search = str(form_data.get("search") or "")
@@ -1687,70 +1316,3 @@ async def submit_single_url(
             "error_message": result.error_message if not result.success else None,
         },
     )
-
-
-async def _build_url_item(
-    session: AsyncSession,
-    url_id: UUID,
-) -> dict[str, Any]:
-    """Build a URL item dict matching WebsiteURLListItem structure."""
-    latest_status_subquery = (
-        select(
-            IndexStatus.url_id.label("url_id"),
-            func.max(IndexStatus.checked_at).label("checked_at"),
-        )
-        .where(IndexStatus.url_id == url_id)
-        .group_by(IndexStatus.url_id)
-        .subquery()
-    )
-
-    row = await session.execute(
-        select(
-            URL.url,
-            URL.latest_index_status,
-            URL.last_checked_at,
-            URL.last_submitted_at,
-            URL.sitemap_id,
-            IndexStatus.verdict,
-            IndexStatus.coverage_state,
-            IndexStatus.last_crawl_time,
-            IndexStatus.google_canonical,
-            IndexStatus.user_canonical,
-        )
-        .where(URL.id == url_id)
-        .outerjoin(latest_status_subquery, latest_status_subquery.c.url_id == URL.id)
-        .outerjoin(
-            IndexStatus,
-            (IndexStatus.url_id == latest_status_subquery.c.url_id)
-            & (IndexStatus.checked_at == latest_status_subquery.c.checked_at),
-        )
-    )
-    result = row.first()
-    if result is None:
-        return {
-            "id": url_id,
-            "url": "",
-            "latest_index_status": URLIndexStatus.UNCHECKED,
-            "last_checked_at": None,
-            "last_submitted_at": None,
-            "sitemap_id": None,
-            "verdict": None,
-            "coverage_state": None,
-            "last_crawl_time": None,
-            "google_canonical": None,
-            "user_canonical": None,
-        }
-
-    return {
-        "id": url_id,
-        "url": result.url,
-        "latest_index_status": result.latest_index_status,
-        "last_checked_at": result.last_checked_at,
-        "last_submitted_at": result.last_submitted_at,
-        "sitemap_id": result.sitemap_id,
-        "verdict": result.verdict,
-        "coverage_state": result.coverage_state,
-        "last_crawl_time": result.last_crawl_time,
-        "google_canonical": result.google_canonical,
-        "user_canonical": result.user_canonical,
-    }
