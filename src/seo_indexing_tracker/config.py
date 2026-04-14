@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     LOG_FILE_MAX_BYTES: int = Field(default=10_485_760, ge=1)
     LOG_FILE_BACKUP_COUNT: int = Field(default=5, ge=1)
     SCHEDULER_ENABLED: bool = True
-    SCHEDULER_JOBSTORE_URL: str = "sqlite:///./scheduler-jobs.sqlite"
+    SCHEDULER_JOBSTORE_URL: str = "sqlite:///./data/scheduler-jobs.sqlite"
     SCHEDULER_URL_SUBMISSION_INTERVAL_SECONDS: int = Field(default=300, ge=1)
     SCHEDULER_INDEX_VERIFICATION_INTERVAL_SECONDS: int = Field(default=900, ge=1)
     SCHEDULER_INDEXED_REVERIFICATION_MIN_AGE_SECONDS: int = Field(default=604800, ge=0)

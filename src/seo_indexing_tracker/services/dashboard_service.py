@@ -234,7 +234,11 @@ async def _build_system_status_context(
 async def _fetch_last_completed_runs(
     *, session: AsyncSession,
 ) -> dict[str, dict[str, object]]:
-    """Return last completed execution metadata for each pipeline job."""
+    """Return last completed execution metadata for each pipeline job.
+
+    Queries for status='success' to match job_runner.py which sets that value
+    on successful completion (not 'completed').
+    """
     job_ids = [URL_SUBMISSION_JOB_ID, INDEX_VERIFICATION_JOB_ID, SITEMAP_REFRESH_JOB_ID]
     result: dict[str, dict[str, object]] = {}
     for job_id in job_ids:
@@ -243,7 +247,7 @@ async def _fetch_last_completed_runs(
                 select(JobExecution)
                 .where(
                     JobExecution.job_id == job_id,
-                    JobExecution.status == "completed",
+                    JobExecution.status == "success",
                 )
                 .order_by(JobExecution.finished_at.desc())
                 .limit(1)
