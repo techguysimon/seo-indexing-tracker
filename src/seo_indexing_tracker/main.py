@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
 import uvicorn
 
@@ -295,6 +296,7 @@ def create_app() -> FastAPI:
 
     app.state.settings = settings
     app.state.templates = templates
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
     add_request_logging_middleware(app)
     app.mount(
         "/static",
