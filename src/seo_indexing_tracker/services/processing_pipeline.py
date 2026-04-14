@@ -200,8 +200,15 @@ class SchedulerProcessingPipelineService:
         )
 
     async def _submit_urls(self, execution_id: UUID) -> JobRunResult:
+        """Submit URLs that have been verified as NOT_INDEXED.
+
+        This job does NOT inspect URLs — that's the verification job's job.
+        It only queries URLs with latest_index_status = NOT_INDEXED and
+        submits them to the Indexing API. This decouples inspection quota
+        from submission, preventing rate-limit cascades.
+        """
         website_credentials = await self._list_websites_with_credentials(
-            requires_queued_urls=True
+            requires_queued_urls=False
         )
         _job_logger.debug(
             "submit_urls_websites_found",
@@ -211,9 +218,9 @@ class SchedulerProcessingPipelineService:
             },
         )
         if not website_credentials:
-            _job_logger.debug("submit_urls_no_websites_with_queued_urls")
+            _job_logger.debug("submit_urls_no_websites_with_credentials")
         processed_websites = 0
-        dequeued_urls = 0
+        submitted_urls = 0
         failed_urls = 0
         last_checkpoint_data: dict[str, Any] | None = {
             "job_id": URL_SUBMISSION_JOB_ID,
@@ -221,30 +228,6 @@ class SchedulerProcessingPipelineService:
             "processed_websites": 0,
             "urls_processed": 0,
         }
-
-        async def persist_batch_checkpoint(
-            website_id: UUID,
-            checkpoint_data: dict[str, Any] | None,
-        ) -> None:
-            nonlocal last_checkpoint_data
-            if checkpoint_data is None:
-                return
-
-            urls_processed = int(checkpoint_data.get("processed_urls", 0))
-            payload = {
-                "job_id": URL_SUBMISSION_JOB_ID,
-                "stage": "submit",
-                "website_id": str(website_id),
-                "processed_websites": processed_websites,
-                "urls_processed": dequeued_urls + urls_processed,
-                "batch_checkpoint": checkpoint_data,
-            }
-            last_checkpoint_data = payload
-            await self._runner.persist_checkpoint(
-                execution_id=execution_id,
-                checkpoint_data=payload,
-                urls_processed=dequeued_urls + urls_processed,
-            )
 
         for website in website_credentials:
             cooldown_window = self._cooldown_service.get_cooldown_window(website)
@@ -302,16 +285,9 @@ class SchedulerProcessingPipelineService:
                 credentials_path=website.service_account.credentials_path,
             )
 
-            async def progress_callback(update: Any) -> None:
-                await persist_batch_checkpoint(
-                    website_id=website.id,
-                    checkpoint_data=getattr(update, "checkpoint_data", None),
-                )
-
-            result = await self._batch_processor.process_batch(
+            result = await self._batch_processor.submit_not_indexed_batch(
                 website.id,
                 requested_urls=self._settings.SCHEDULER_URL_SUBMISSION_BATCH_SIZE,
-                progress_callback=progress_callback,
             )
             _job_logger.debug(
                 "submit_urls_batch_complete",
@@ -323,7 +299,7 @@ class SchedulerProcessingPipelineService:
                 },
             )
             processed_websites += 1
-            dequeued_urls += result.dequeued_urls
+            submitted_urls += result.submission_success_count
             failed_urls += result.submission_failure_count
             await self._log_activity(
                 event_type="url_submitted",
@@ -346,22 +322,22 @@ class SchedulerProcessingPipelineService:
                 "stage": "submit",
                 "website_id": str(website.id),
                 "processed_websites": processed_websites,
-                "urls_processed": dequeued_urls,
+                "urls_processed": submitted_urls,
             }
             await self._runner.persist_checkpoint(
                 execution_id=execution_id,
                 checkpoint_data=last_checkpoint_data,
-                urls_processed=dequeued_urls,
+                urls_processed=submitted_urls,
             )
 
         summary = {
             "processed_websites": processed_websites,
-            "dequeued_urls": dequeued_urls,
+            "submitted_urls": submitted_urls,
             "failed_urls": failed_urls,
         }
         return JobRunResult(
             summary=summary,
-            urls_processed=dequeued_urls,
+            urls_processed=submitted_urls,
             checkpoint_data=last_checkpoint_data,
         )
 
@@ -584,6 +560,12 @@ class SchedulerProcessingPipelineService:
         self,
         website_id: UUID,
     ) -> list[_VerificationCandidate]:
+        """Pick URLs for verification, prioritizing UNCHECKED URLs.
+
+        Order: UNCHECKED (never verified) > NOT_INDEXED > ERROR > INDEXED (re-verify).
+        This ensures the backlog of unchecked URLs is cleared first, which is
+        critical for the verify-then-submit pipeline.
+        """
         indexed_reverification_cutoff = datetime.now(UTC) - timedelta(
             seconds=self._cooldown_service.get_indexed_reverification_min_age()
         )
@@ -608,9 +590,9 @@ class SchedulerProcessingPipelineService:
                 )
                 .order_by(
                     case(
-                        (URL.latest_index_status == "ERROR", 0),
+                        (URL.latest_index_status == "UNCHECKED", 0),
                         (URL.latest_index_status == "NOT_INDEXED", 1),
-                        (URL.latest_index_status == "UNCHECKED", 2),
+                        (URL.latest_index_status == "ERROR", 2),
                         (URL.latest_index_status == "INDEXED", 3),
                         else_=4,
                     ),

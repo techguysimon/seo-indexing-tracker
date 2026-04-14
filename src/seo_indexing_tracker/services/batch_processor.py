@@ -9,10 +9,10 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from enum import Enum
 import logging
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from uuid import UUID
 
-from sqlalchemy import and_, func, insert, select, update as update_stmt
+from sqlalchemy import and_, bindparam, func, insert, select, update as update_stmt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seo_indexing_tracker.models import (
@@ -510,6 +510,143 @@ class BatchProcessorService:
                 finalization_completed=finalization_completed,
             )
             raise
+
+    async def submit_not_indexed_batch(
+        self,
+        website_id: UUID,
+        *,
+        requested_urls: int | None = None,
+        action: SubmissionAction = SubmissionAction.URL_UPDATED,
+    ) -> BatchProcessingResult:
+        """Submit URLs that are verified as NOT_INDEXED — no inspection step.
+
+        This method queries URLs with latest_index_status = NOT_INDEXED directly
+        from the database and submits them to the Indexing API. It does NOT
+        inspect URLs before submission — the verification job handles that.
+
+        This decouples inspection quota from submission, preventing rate-limit
+        cascades where inspection failures block the entire submission pipeline.
+        """
+        if requested_urls is not None and requested_urls <= 0:
+            raise ValueError("requested_urls must be greater than zero")
+
+        batch_size = requested_urls or self._submit_batch_size
+
+        # Query NOT_INDEXED URLs directly — these have been verified by the
+        # separate verification job and are confirmed to need submission.
+        async with self._session_factory() as session:
+            not_indexed_urls = list(
+                await session.scalars(
+                    select(URL)
+                    .where(
+                        URL.website_id == website_id,
+                        URL.latest_index_status == "NOT_INDEXED",
+                        URL.current_priority > 0,
+                    )
+                    .order_by(URL.current_priority.desc(), URL.updated_at.asc())
+                    .limit(batch_size)
+                )
+            )
+
+        if not not_indexed_urls:
+            return self._empty_result(
+                website_id=website_id, requested_urls=batch_size
+            )
+
+        # Mark dequeued URLs as processed (priority = 0)
+        async with self._session_factory() as session:
+            url_table = cast(Any, URL.__table__)
+            processed_rows = [
+                {"b_id": url.id, "current_priority": 0.0}
+                for url in not_indexed_urls
+            ]
+            for url in not_indexed_urls:
+                url.current_priority = 0.0
+            await session.execute(
+                update_stmt(url_table)
+                .where(url_table.c.id == bindparam("b_id"))
+                .values(current_priority=bindparam("current_priority"))
+                .execution_options(synchronize_session=False),
+                processed_rows,
+            )
+
+        outcomes = self._initial_outcomes(not_indexed_urls)
+        ordered_url_ids = [url.id for url in not_indexed_urls]
+
+        try:
+            clients = self._client_factory.get_client(website_id)
+        except Exception as error:
+            failure_outcomes = {
+                url_id: self._with_submission_failure(
+                    outcomes[url_id],
+                    error_code="CLIENT_INIT_FAILED",
+                    error_message=str(error),
+                )
+                for url_id in ordered_url_ids
+            }
+            await self._priority_queue.enqueue_many(ordered_url_ids)
+            return BatchProcessingResult(
+                website_id=website_id,
+                requested_urls=batch_size,
+                dequeued_urls=len(not_indexed_urls),
+                submitted_urls=0,
+                submission_success_count=0,
+                submission_failure_count=len(not_indexed_urls),
+                inspected_urls=0,
+                inspection_success_count=0,
+                inspection_failure_count=0,
+                requeued_urls=len(not_indexed_urls),
+                status=BatchProcessorStatus.FAILED,
+                outcomes=[failure_outcomes[url_id] for url_id in ordered_url_ids],
+            )
+
+        # Submit directly — no inspection, URLs are already verified NOT_INDEXED
+        submitted_results: dict[UUID, IndexingURLResult] = {}
+        submission_logs: list[_SubmissionLogRecord] = []
+
+        for url_batch in chunk_sequence(not_indexed_urls, self._submit_batch_size):
+            batch_results, batch_logs = await self._submit_url_batch(
+                website_id=website_id,
+                urls=url_batch,
+                action=action,
+                client=clients.indexing,
+            )
+            submitted_results.update(batch_results)
+            submission_logs.extend(batch_logs)
+
+            for url_id, submission_result in batch_results.items():
+                outcomes[url_id] = self._with_submission_result(
+                    outcomes[url_id], submission_result
+                )
+
+        await self._record_submission_logs(action=action, logs=submission_logs)
+
+        # Requeue failed URLs
+        failed_url_ids = [
+            outcome.url_id
+            for outcome in outcomes.values()
+            if self._should_requeue_outcome(outcome)
+        ]
+        requeued_count = await self._priority_queue.enqueue_many(failed_url_ids)
+
+        final_outcomes = [outcomes[url_id] for url_id in ordered_url_ids]
+        submission_success_count = self._submission_success_count(final_outcomes)
+        status = BatchProcessorStatus(derive_final_status(final_outcomes))
+
+        return BatchProcessingResult(
+            website_id=website_id,
+            requested_urls=batch_size,
+            dequeued_urls=len(not_indexed_urls),
+            submitted_urls=len(submitted_results),
+            submission_success_count=submission_success_count,
+            submission_failure_count=len(submitted_results) - submission_success_count,
+            inspected_urls=0,
+            inspection_success_count=0,
+            inspection_failure_count=0,
+            requeued_urls=requeued_count,
+            status=status,
+            outcomes=final_outcomes,
+        )
 
     async def _submit_url_batch(
         self,
