@@ -13,6 +13,7 @@ from typing import Any, Protocol, cast
 from uuid import UUID
 
 from sqlalchemy import and_, case, func, insert, or_, select
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seo_indexing_tracker.config import Settings
@@ -27,6 +28,7 @@ from seo_indexing_tracker.models import (
 )
 from seo_indexing_tracker.services.activity_service import ActivityService
 from seo_indexing_tracker.services.batch_processor import BatchProcessorService
+from seo_indexing_tracker.services.cooldown_service import CooldownService
 from seo_indexing_tracker.services.google_api_factory import (
     WebsiteGoogleAPIClients,
     WebsiteServiceAccountConfig,
@@ -61,7 +63,6 @@ URL_SUBMISSION_JOB_ID = "url-submission-job"
 INDEX_VERIFICATION_JOB_ID = "index-verification-job"
 SITEMAP_REFRESH_JOB_ID = "sitemap-refresh-job"
 DEFAULT_RATE_LIMIT_ACQUIRE_TIMEOUT_SECONDS = 10.0
-DEFAULT_INDEXED_REVERIFICATION_MIN_AGE_SECONDS = 7 * 24 * 60 * 60
 
 
 @dataclass(slots=True)
@@ -88,25 +89,6 @@ class JobRunResult:
     summary: dict[str, int]
     urls_processed: int
     checkpoint_data: dict[str, Any] | None = None
-
-
-@dataclass(slots=True, frozen=True)
-class _WebsiteCredentials:
-    website_id: UUID
-    domain: str
-    credentials_path: str
-    quota_last_429_at: datetime | None
-    internal_rate_limit_at: datetime | None
-
-
-@dataclass(slots=True, frozen=True)
-class _SubmissionCooldownWindow:
-    website_id: UUID
-    domain: str
-    last_429_at: datetime
-    cooldown_seconds: int
-    next_allowed_at: datetime
-    is_internal_rate_limit: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -412,6 +394,7 @@ class SchedulerProcessingPipelineService:
             rate_limiter=self._rate_limiter,
         )
         self._activity_service = ActivityService()
+        self._cooldown_service = CooldownService(settings=settings)
         self._runner = _OverlapProtectedRunner()
 
     def register_jobs(self) -> None:
@@ -470,7 +453,7 @@ class SchedulerProcessingPipelineService:
             "submit_urls_websites_found",
             extra={
                 "website_count": len(website_credentials),
-                "website_ids": [str(w.website_id) for w in website_credentials],
+                "website_ids": [str(w.id) for w in website_credentials],
             },
         )
         if not website_credentials:
@@ -510,7 +493,7 @@ class SchedulerProcessingPipelineService:
             )
 
         for website in website_credentials:
-            cooldown_window = self._submission_cooldown_window(website)
+            cooldown_window = self._cooldown_service.get_cooldown_window(website)
             if cooldown_window is not None:
                 # Build metadata based on cooldown type
                 if cooldown_window.is_internal_rate_limit:
@@ -536,16 +519,16 @@ class SchedulerProcessingPipelineService:
 
                 await self._log_activity(
                     event_type="url_submission_skipped_rate_limited",
-                    website_id=website.website_id,
+                    website_id=website.id,
                     resource_type="website",
-                    resource_id=website.website_id,
+                    resource_id=website.id,
                     message=log_message,
                     metadata=cooldown_metadata,
                 )
                 _job_logger.info(
                     "submit_urls_skipped_rate_limit_cooldown",
                     extra={
-                        "website_id": str(website.website_id),
+                        "website_id": str(website.id),
                         "website_domain": website.domain,
                         **cooldown_metadata,
                     },
@@ -555,30 +538,31 @@ class SchedulerProcessingPipelineService:
             _job_logger.debug(
                 "submit_urls_processing_website",
                 extra={
-                    "website_id": str(website.website_id),
+                    "website_id": str(website.id),
                     "batch_size": self._settings.SCHEDULER_URL_SUBMISSION_BATCH_SIZE,
                 },
             )
+            assert website.service_account is not None
             self._client_factory.register_website(
-                website_id=website.website_id,
-                credentials_path=website.credentials_path,
+                website_id=website.id,
+                credentials_path=website.service_account.credentials_path,
             )
 
             async def progress_callback(update: Any) -> None:
                 await persist_batch_checkpoint(
-                    website_id=website.website_id,
+                    website_id=website.id,
                     checkpoint_data=getattr(update, "checkpoint_data", None),
                 )
 
             result = await self._batch_processor.process_batch(
-                website.website_id,
+                website.id,
                 requested_urls=self._settings.SCHEDULER_URL_SUBMISSION_BATCH_SIZE,
                 progress_callback=progress_callback,
             )
             _job_logger.debug(
                 "submit_urls_batch_complete",
                 extra={
-                    "website_id": str(website.website_id),
+                    "website_id": str(website.id),
                     "dequeued_urls": result.dequeued_urls,
                     "submission_success_count": result.submission_success_count,
                     "submission_failure_count": result.submission_failure_count,
@@ -589,12 +573,12 @@ class SchedulerProcessingPipelineService:
             failed_urls += result.submission_failure_count
             await self._log_activity(
                 event_type="url_submitted",
-                website_id=website.website_id,
+                website_id=website.id,
                 resource_type="website",
-                resource_id=website.website_id,
+                resource_id=website.id,
                 message=(
                     f"Submitted {result.submission_success_count} URLs "
-                    f"for website {website.website_id}"
+                    f"for website {website.id}"
                 ),
                 metadata={
                     "dequeued_urls": result.dequeued_urls,
@@ -606,7 +590,7 @@ class SchedulerProcessingPipelineService:
             last_checkpoint_data = {
                 "job_id": URL_SUBMISSION_JOB_ID,
                 "stage": "submit",
-                "website_id": str(website.website_id),
+                "website_id": str(website.id),
                 "processed_websites": processed_websites,
                 "urls_processed": dequeued_urls,
             }
@@ -636,7 +620,7 @@ class SchedulerProcessingPipelineService:
             "verify_index_websites_found",
             extra={
                 "website_count": len(website_credentials),
-                "website_ids": [str(w.website_id) for w in website_credentials],
+                "website_ids": [str(w.id) for w in website_credentials],
             },
         )
         if not website_credentials:
@@ -645,12 +629,12 @@ class SchedulerProcessingPipelineService:
         failed_urls = 0
 
         for website in website_credentials:
-            cooldown_window = self._submission_cooldown_window(website)
+            cooldown_window = self._cooldown_service.get_cooldown_window(website)
             if cooldown_window is not None:
                 # Build log extra based on cooldown type
                 if cooldown_window.is_internal_rate_limit:
                     log_extra = {
-                        "website_id": str(website.website_id),
+                        "website_id": str(website.id),
                         "website_domain": website.domain,
                         "cooldown_type": "internal_rate_limit",
                         "internal_rate_limit_at": cooldown_window.last_429_at.isoformat(),
@@ -660,7 +644,7 @@ class SchedulerProcessingPipelineService:
                     }
                 else:
                     log_extra = {
-                        "website_id": str(website.website_id),
+                        "website_id": str(website.id),
                         "website_domain": website.domain,
                         "cooldown_type": "google_429",
                         "quota_last_429_at": cooldown_window.last_429_at.isoformat(),
@@ -676,17 +660,18 @@ class SchedulerProcessingPipelineService:
 
             _job_logger.debug(
                 "verify_index_processing_website",
-                extra={"website_id": str(website.website_id)},
+                extra={"website_id": str(website.id)},
             )
+            assert website.service_account is not None
             self._client_factory.register_website(
-                website_id=website.website_id,
-                credentials_path=website.credentials_path,
+                website_id=website.id,
+                credentials_path=website.service_account.credentials_path,
             )
-            candidate_urls = await self._pick_urls_for_verification(website.website_id)
+            candidate_urls = await self._pick_urls_for_verification(website.id)
             _job_logger.debug(
                 "verify_index_candidates_found",
                 extra={
-                    "website_id": str(website.website_id),
+                    "website_id": str(website.id),
                     "candidate_count": len(candidate_urls),
                 },
             )
@@ -694,7 +679,7 @@ class SchedulerProcessingPipelineService:
                 continue
 
             inspection_client = self._client_factory.get_client(
-                website.website_id
+                website.id
             ).search_console
             inspection_rows: list[dict[str, object]] = []
             results_by_url_id: dict[UUID, IndexStatusResult] = {}
@@ -702,7 +687,7 @@ class SchedulerProcessingPipelineService:
             saw_internal_rate_limit = False
             for candidate in candidate_urls:
                 result = await self._inspect_single_url(
-                    website_id=website.website_id,
+                    website_id=website.id,
                     candidate=candidate,
                     client=inspection_client,
                 )
@@ -726,7 +711,7 @@ class SchedulerProcessingPipelineService:
                 url_by_id = {url.id: url for url in urls}
 
                 checked_at = datetime.now(UTC)
-                website_row = await session.get(Website, website.website_id)
+                website_row = await session.get(Website, website.id)
                 if website_row is not None:
                     # Only set quota_last_429_at for actual Google HTTP 429 responses
                     # This triggers the long cooldown for genuine quota exhaustion
@@ -818,16 +803,11 @@ class SchedulerProcessingPipelineService:
         self,
         *,
         requires_queued_urls: bool,
-    ) -> list[_WebsiteCredentials]:
+    ) -> list[Website]:
         async with session_scope() as session:
             statement = (
-                select(
-                    Website.id,
-                    Website.domain,
-                    ServiceAccount.credentials_path,
-                    Website.quota_last_429_at,
-                    Website.internal_rate_limit_at,
-                )
+                select(Website)
+                .options(joinedload(Website.service_account))
                 .join(ServiceAccount, ServiceAccount.website_id == Website.id)
                 .where(Website.is_active.is_(True))
             )
@@ -839,76 +819,15 @@ class SchedulerProcessingPipelineService:
                 )
                 statement = statement.where(queued_url_count > 0)
 
-            rows = (await session.execute(statement)).all()
-            return [
-                _WebsiteCredentials(
-                    website_id=row[0],
-                    domain=row[1],
-                    credentials_path=row[2],
-                    quota_last_429_at=row[3],
-                    internal_rate_limit_at=row[4],
-                )
-                for row in rows
-            ]
-
-    def _is_submission_cooldown_active(self, website: _WebsiteCredentials) -> bool:
-        return self._submission_cooldown_window(website) is not None
-
-    def _submission_cooldown_window(
-        self, website: _WebsiteCredentials
-    ) -> _SubmissionCooldownWindow | None:
-        cooldown_seconds = int(self._settings.QUOTA_RATE_LIMIT_COOLDOWN_SECONDS)
-        if cooldown_seconds <= 0:
-            return None
-
-        now = datetime.now(UTC)
-
-        # First check for Google HTTP 429 cooldown (higher priority)
-        if website.quota_last_429_at is not None:
-            normalized_last_429_at = website.quota_last_429_at
-            if normalized_last_429_at.tzinfo is None:
-                normalized_last_429_at = normalized_last_429_at.replace(tzinfo=UTC)
-
-            next_allowed_at = normalized_last_429_at + timedelta(
-                seconds=cooldown_seconds
-            )
-            if now < next_allowed_at:
-                return _SubmissionCooldownWindow(
-                    website_id=website.website_id,
-                    domain=website.domain,
-                    last_429_at=normalized_last_429_at,
-                    cooldown_seconds=cooldown_seconds,
-                    next_allowed_at=next_allowed_at,
-                    is_internal_rate_limit=False,
-                )
-
-        # Then check for internal rate limit cooldown
-        if website.internal_rate_limit_at is not None:
-            normalized_internal_at = website.internal_rate_limit_at
-            if normalized_internal_at.tzinfo is None:
-                normalized_internal_at = normalized_internal_at.replace(tzinfo=UTC)
-
-            next_allowed_at = normalized_internal_at + timedelta(
-                seconds=cooldown_seconds
-            )
-            if now < next_allowed_at:
-                return _SubmissionCooldownWindow(
-                    website_id=website.website_id,
-                    domain=website.domain,
-                    last_429_at=normalized_internal_at,
-                    cooldown_seconds=cooldown_seconds,
-                    next_allowed_at=next_allowed_at,
-                    is_internal_rate_limit=True,
-                )
-
-        return None
+            result = await session.execute(statement)
+            return list(result.unique().scalars().all())
 
     async def _pick_urls_for_verification(
         self,
         website_id: UUID,
     ) -> list[_VerificationCandidate]:
-        indexed_reverification_cutoff = (
-            datetime.now(UTC) - self._indexed_reverification_min_age()
+        indexed_reverification_cutoff = datetime.now(UTC) - timedelta(
+            seconds=self._cooldown_service.get_indexed_reverification_min_age()
         )
         async with session_scope() as session:
             statement = (
@@ -951,20 +870,6 @@ class SchedulerProcessingPipelineService:
                 _VerificationCandidate(url_id=row[0], url=row[1], site_url=row[2])
                 for row in rows
             ]
-
-    def _indexed_reverification_min_age(self) -> timedelta:
-        configured_age_seconds = getattr(
-            self._settings,
-            "SCHEDULER_INDEXED_REVERIFICATION_MIN_AGE_SECONDS",
-            None,
-        )
-        if (
-            isinstance(configured_age_seconds, int | float)
-            and configured_age_seconds >= 0
-        ):
-            return timedelta(seconds=float(configured_age_seconds))
-
-        return timedelta(seconds=DEFAULT_INDEXED_REVERIFICATION_MIN_AGE_SECONDS)
 
     async def _inspect_single_url(
         self,

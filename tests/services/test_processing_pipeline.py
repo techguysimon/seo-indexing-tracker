@@ -26,7 +26,6 @@ from seo_indexing_tracker.services.processing_pipeline import (
     INDEX_VERIFICATION_JOB_ID,
     SITEMAP_REFRESH_JOB_ID,
     URL_SUBMISSION_JOB_ID,
-    _WebsiteCredentials,
     SchedulerProcessingPipelineService,
     set_scheduler_processing_pipeline_service,
 )
@@ -222,17 +221,15 @@ async def test_processing_pipeline_verification_non_rate_limit_acquire_error_doe
             )
         )
 
-    website_credentials = _WebsiteCredentials(
-        website_id=website_id,
+    website_credentials = SimpleNamespace(
+        id=website_id,
         domain=unique_domain,
-        credentials_path="/tmp/non-rate-limit.json",
+        service_account=SimpleNamespace(credentials_path="/tmp/non-rate-limit.json"),
         quota_last_429_at=None,
         internal_rate_limit_at=None,
     )
 
-    async def fake_list_websites(
-        *, requires_queued_urls: bool
-    ) -> list[_WebsiteCredentials]:
+    async def fake_list_websites(*, requires_queued_urls: bool) -> list[Any]:
         assert requires_queued_urls is False
         return [website_credentials]
 
@@ -323,24 +320,22 @@ async def test_processing_pipeline_submission_skips_websites_in_429_cooldown(
         ),
     )
 
-    website_in_cooldown = _WebsiteCredentials(
-        website_id=uuid4(),
+    website_in_cooldown = SimpleNamespace(
+        id=uuid4(),
         domain="in-cooldown.example",
-        credentials_path="/tmp/in-cooldown.json",
+        service_account=SimpleNamespace(credentials_path="/tmp/in-cooldown.json"),
         quota_last_429_at=datetime.now(UTC) - timedelta(minutes=10),
         internal_rate_limit_at=None,
     )
-    website_ready = _WebsiteCredentials(
-        website_id=uuid4(),
+    website_ready = SimpleNamespace(
+        id=uuid4(),
         domain="ready.example",
-        credentials_path="/tmp/ready.json",
+        service_account=SimpleNamespace(credentials_path="/tmp/ready.json"),
         quota_last_429_at=datetime.now(UTC) - timedelta(hours=2),
         internal_rate_limit_at=None,
     )
 
-    async def fake_list_websites(
-        *, requires_queued_urls: bool
-    ) -> list[_WebsiteCredentials]:
+    async def fake_list_websites(*, requires_queued_urls: bool) -> list[Any]:
         assert requires_queued_urls is True
         return [website_in_cooldown, website_ready]
 
@@ -386,7 +381,7 @@ async def test_processing_pipeline_submission_skips_websites_in_429_cooldown(
 
     result = await pipeline_service._submit_urls(execution_id=uuid4())
 
-    assert processed_website_ids == [str(website_ready.website_id)]
+    assert processed_website_ids == [str(website_ready.id)]
     assert result.summary == {
         "processed_websites": 1,
         "dequeued_urls": 2,
@@ -418,24 +413,22 @@ async def test_processing_pipeline_verification_skips_websites_in_429_cooldown(
         ),
     )
 
-    website_in_cooldown = _WebsiteCredentials(
-        website_id=uuid4(),
+    website_in_cooldown = SimpleNamespace(
+        id=uuid4(),
         domain="in-cooldown.example",
-        credentials_path="/tmp/in-cooldown.json",
+        service_account=SimpleNamespace(credentials_path="/tmp/in-cooldown.json"),
         quota_last_429_at=datetime.now(UTC) - timedelta(minutes=10),
         internal_rate_limit_at=None,
     )
-    website_ready = _WebsiteCredentials(
-        website_id=uuid4(),
+    website_ready = SimpleNamespace(
+        id=uuid4(),
         domain="ready.example",
-        credentials_path="/tmp/ready.json",
+        service_account=SimpleNamespace(credentials_path="/tmp/ready.json"),
         quota_last_429_at=datetime.now(UTC) - timedelta(hours=2),
         internal_rate_limit_at=None,
     )
 
-    async def fake_list_websites(
-        *, requires_queued_urls: bool
-    ) -> list[_WebsiteCredentials]:
+    async def fake_list_websites(*, requires_queued_urls: bool) -> list[Any]:
         assert requires_queued_urls is False
         return [website_in_cooldown, website_ready]
 
@@ -458,7 +451,7 @@ async def test_processing_pipeline_verification_skips_websites_in_429_cooldown(
 
     result = await pipeline_service._verify_index_statuses(execution_id=uuid4())
 
-    assert picked_website_ids == [str(website_ready.website_id)]
+    assert picked_website_ids == [str(website_ready.id)]
     assert result.summary == {
         "processed_websites": 2,
         "inspected_urls": 0,
@@ -487,29 +480,28 @@ def test_submission_cooldown_window_allows_resume_after_cooldown(
             ),
         ),
     )
+    cooldown_service = pipeline_service._cooldown_service
 
-    website_ready = _WebsiteCredentials(
-        website_id=uuid4(),
+    website_ready = SimpleNamespace(
+        id=uuid4(),
         domain="resume.example",
-        credentials_path="/tmp/resume.json",
         quota_last_429_at=datetime.now(UTC) - timedelta(seconds=3600),
         internal_rate_limit_at=None,
     )
-    website_in_cooldown = _WebsiteCredentials(
-        website_id=uuid4(),
+    website_in_cooldown = SimpleNamespace(
+        id=uuid4(),
         domain="still-cooling.example",
-        credentials_path="/tmp/still-cooling.json",
         quota_last_429_at=datetime.now(UTC) - timedelta(seconds=3599),
         internal_rate_limit_at=None,
     )
 
-    assert pipeline_service._submission_cooldown_window(website_ready) is None
-    assert pipeline_service._is_submission_cooldown_active(website_ready) is False
+    assert cooldown_service.get_cooldown_window(cast(Any, website_ready)) is None
 
-    cooldown_window = pipeline_service._submission_cooldown_window(website_in_cooldown)
+    cooldown_window = cooldown_service.get_cooldown_window(
+        cast(Any, website_in_cooldown)
+    )
     assert cooldown_window is not None
     assert cooldown_window.domain == "still-cooling.example"
-    assert pipeline_service._is_submission_cooldown_active(website_in_cooldown) is True
 
 
 @pytest.mark.asyncio
@@ -721,17 +713,15 @@ async def test_processing_pipeline_verification_google_429_sets_quota_last_429_a
             )
         )
 
-    website_credentials = _WebsiteCredentials(
-        website_id=website_id,
+    website_credentials = SimpleNamespace(
+        id=website_id,
         domain=unique_domain,
-        credentials_path="/tmp/google-429.json",
+        service_account=SimpleNamespace(credentials_path="/tmp/google-429.json"),
         quota_last_429_at=None,
         internal_rate_limit_at=None,
     )
 
-    async def fake_list_websites(
-        *, requires_queued_urls: bool
-    ) -> list[_WebsiteCredentials]:
+    async def fake_list_websites(*, requires_queued_urls: bool) -> list[Any]:
         assert requires_queued_urls is False
         return [website_credentials]
 
@@ -855,17 +845,15 @@ async def test_processing_pipeline_verification_internal_rate_limit_sets_interna
             )
         )
 
-    website_credentials = _WebsiteCredentials(
-        website_id=website_id,
+    website_credentials = SimpleNamespace(
+        id=website_id,
         domain=unique_domain,
-        credentials_path="/tmp/internal-rl.json",
+        service_account=SimpleNamespace(credentials_path="/tmp/internal-rl.json"),
         quota_last_429_at=None,
         internal_rate_limit_at=None,
     )
 
-    async def fake_list_websites(
-        *, requires_queued_urls: bool
-    ) -> list[_WebsiteCredentials]:
+    async def fake_list_websites(*, requires_queued_urls: bool) -> list[Any]:
         assert requires_queued_urls is False
         return [website_credentials]
 
@@ -962,26 +950,26 @@ async def test_processing_pipeline_cooldown_only_checks_quota_last_429_at(
     )
 
     # Website with recent internal rate limit but NO Google 429
-    website_internal_only = _WebsiteCredentials(
-        website_id=uuid4(),
+    website_internal_only = SimpleNamespace(
+        id=uuid4(),
         domain="internal-only.example",
-        credentials_path="/tmp/internal-only.json",
+        service_account=SimpleNamespace(credentials_path="/tmp/internal-only.json"),
         quota_last_429_at=None,  # No Google 429
         internal_rate_limit_at=None,  # Also no internal rate limit
     )
 
     # Website with recent Google 429
-    website_google_429 = _WebsiteCredentials(
-        website_id=uuid4(),
+    website_google_429 = SimpleNamespace(
+        id=uuid4(),
         domain="google-429-cooldown.example",
-        credentials_path="/tmp/google-429-cooldown.json",
+        service_account=SimpleNamespace(
+            credentials_path="/tmp/google-429-cooldown.json"
+        ),
         quota_last_429_at=datetime.now(UTC) - timedelta(minutes=10),
         internal_rate_limit_at=None,
     )
 
-    async def fake_list_websites(
-        *, requires_queued_urls: bool
-    ) -> list[_WebsiteCredentials]:
+    async def fake_list_websites(*, requires_queued_urls: bool) -> list[Any]:
         assert requires_queued_urls is True
         return [website_internal_only, website_google_429]
 
@@ -1029,7 +1017,7 @@ async def test_processing_pipeline_cooldown_only_checks_quota_last_429_at(
 
     # Only the website with NO quota_last_429_at should be processed
     # The website with Google 429 should be in cooldown
-    assert processed_website_ids == [str(website_internal_only.website_id)]
+    assert processed_website_ids == [str(website_internal_only.id)]
     assert result.summary == {
         "processed_websites": 1,
         "dequeued_urls": 2,
@@ -1061,38 +1049,38 @@ async def test_processing_pipeline_internal_rate_limit_triggers_cooldown(
         ),
     )
 
+    cooldown_service = pipeline_service._cooldown_service
+
     # Website with recent internal rate limit (should be in cooldown)
-    website_internal_cooldown = _WebsiteCredentials(
-        website_id=uuid4(),
+    website_internal_cooldown = SimpleNamespace(
+        id=uuid4(),
         domain="internal-cooldown.example",
-        credentials_path="/tmp/internal-cooldown.json",
+        service_account=SimpleNamespace(credentials_path="/tmp/internal-cooldown.json"),
         quota_last_429_at=None,  # No Google 429
         internal_rate_limit_at=datetime.now(UTC)
         - timedelta(minutes=10),  # Recent internal RL
     )
 
     # Website with no rate limit issues (should be processed)
-    website_ready = _WebsiteCredentials(
-        website_id=uuid4(),
+    website_ready = SimpleNamespace(
+        id=uuid4(),
         domain="ready-no-rl.example",
-        credentials_path="/tmp/ready-no-rl.json",
+        service_account=SimpleNamespace(credentials_path="/tmp/ready-no-rl.json"),
         quota_last_429_at=None,
         internal_rate_limit_at=None,
     )
 
     # Verify cooldown window detection
-    internal_cooldown_window = pipeline_service._submission_cooldown_window(
-        website_internal_cooldown
+    internal_cooldown_window = cooldown_service.get_cooldown_window(
+        cast(Any, website_internal_cooldown)
     )
     assert internal_cooldown_window is not None
     assert internal_cooldown_window.is_internal_rate_limit is True
 
-    ready_window = pipeline_service._submission_cooldown_window(website_ready)
+    ready_window = cooldown_service.get_cooldown_window(cast(Any, website_ready))
     assert ready_window is None
 
-    async def fake_list_websites(
-        *, requires_queued_urls: bool
-    ) -> list[_WebsiteCredentials]:
+    async def fake_list_websites(*, requires_queued_urls: bool) -> list[Any]:
         assert requires_queued_urls is True
         return [website_internal_cooldown, website_ready]
 
@@ -1142,7 +1130,7 @@ async def test_processing_pipeline_internal_rate_limit_triggers_cooldown(
 
     # Only the website with NO internal_rate_limit_at should be processed
     # The website with internal rate limit should be in cooldown
-    assert processed_website_ids == [str(website_ready.website_id)]
+    assert processed_website_ids == [str(website_ready.id)]
     assert result.summary == {
         "processed_websites": 1,
         "dequeued_urls": 2,
