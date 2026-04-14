@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from seo_indexing_tracker.models import (
     IndexStatus,
-    IndexVerdict,
     SubmissionAction,
     SubmissionLog,
     SubmissionStatus,
@@ -26,6 +25,11 @@ from seo_indexing_tracker.models import (
 )
 from seo_indexing_tracker.utils.index_status import (
     derive_url_index_status_from_coverage_state,
+)
+from seo_indexing_tracker.utils.shared_helpers import (
+    extract_index_status_result,
+    optional_text,
+    parse_verdict,
 )
 from seo_indexing_tracker.services.google_indexing_client import (
     BatchSubmitResult,
@@ -780,26 +784,24 @@ class BatchProcessorService:
     ) -> dict[str, Any]:
         result = record.result
         raw_response = result.raw_response or {}
-        index_status_result = self._extract_index_status_result(raw_response)
+        index_status_result = extract_index_status_result(raw_response)
 
         return {
             "url_id": record.url_id,
             "coverage_state": result.coverage_state or "INSPECTION_FAILED",
-            "verdict": self._index_verdict(result.verdict),
+            "verdict": parse_verdict(result.verdict),
             "last_crawl_time": result.last_crawl_time,
             "indexed_at": result.last_crawl_time,
             "checked_at": checked_at,
             "robots_txt_state": result.robots_txt_state,
             "indexing_state": result.indexing_state,
-            "page_fetch_state": self._optional_text(
+            "page_fetch_state": optional_text(
                 index_status_result.get("pageFetchState")
             ),
-            "google_canonical": self._optional_text(
+            "google_canonical": optional_text(
                 index_status_result.get("googleCanonical")
             ),
-            "user_canonical": self._optional_text(
-                index_status_result.get("userCanonical")
-            ),
+            "user_canonical": optional_text(index_status_result.get("userCanonical")),
             "raw_response": (
                 raw_response
                 if raw_response
@@ -997,41 +999,6 @@ class BatchProcessorService:
             for outcome in outcomes
             if outcome.inspection_attempted and outcome.inspection_success
         )
-
-    @staticmethod
-    def _index_verdict(verdict: str | None) -> IndexVerdict:
-        if verdict is None:
-            return IndexVerdict.NEUTRAL
-
-        normalized_verdict = verdict.strip().upper()
-        if normalized_verdict in {
-            IndexVerdict.PASS.value,
-            IndexVerdict.FAIL.value,
-            IndexVerdict.NEUTRAL.value,
-            IndexVerdict.PARTIAL.value,
-        }:
-            return IndexVerdict(normalized_verdict)
-
-        return IndexVerdict.NEUTRAL
-
-    @staticmethod
-    def _extract_index_status_result(raw_response: dict[str, Any]) -> dict[str, Any]:
-        inspection_result = raw_response.get("inspectionResult")
-        if not isinstance(inspection_result, dict):
-            return {}
-
-        index_status_result = inspection_result.get("indexStatusResult")
-        if not isinstance(index_status_result, dict):
-            return {}
-
-        return index_status_result
-
-    @staticmethod
-    def _optional_text(value: Any) -> str | None:
-        if isinstance(value, str):
-            stripped = value.strip()
-            return stripped if stripped else None
-        return None
 
     @staticmethod
     def _derive_final_status(

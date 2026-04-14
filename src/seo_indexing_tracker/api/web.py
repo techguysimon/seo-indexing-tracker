@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -27,10 +26,15 @@ from seo_indexing_tracker.api.urls import (
     fetch_website_urls,
     list_website_sitemaps,
 )
+from seo_indexing_tracker.utils.form_helpers import (
+    _form_bool,
+    _form_float,
+    _form_int,
+    _form_uuid,
+)
 from seo_indexing_tracker.models import (
     ActivityLog,
     IndexStatus,
-    IndexVerdict,
     JobExecution,
     QuotaUsage,
     ServiceAccount,
@@ -44,6 +48,12 @@ from seo_indexing_tracker.models import (
 from seo_indexing_tracker.models.website import QuotaDiscoveryStatus
 from seo_indexing_tracker.services.index_stats_service import IndexStatsService
 from seo_indexing_tracker.services.activity_service import ActivityService
+from seo_indexing_tracker.services.url_inspection_service import (
+    inspect_single_url as inspect_single_url_service,
+)
+from seo_indexing_tracker.services.url_submission_service import (
+    submit_single_url as submit_single_url_service,
+)
 from seo_indexing_tracker.services.config_validation import (
     ConfigurationValidationError,
     ConfigurationValidationService,
@@ -66,13 +76,7 @@ from seo_indexing_tracker.services.processing_pipeline import (
     SITEMAP_REFRESH_JOB_ID,
     URL_SUBMISSION_JOB_ID,
 )
-from seo_indexing_tracker.services.google_api_factory import (
-    WebsiteGoogleAPIClients,
-    WebsiteServiceAccountConfig,
-)
-from seo_indexing_tracker.utils.index_status import (
-    derive_url_index_status_from_coverage_state,
-)
+
 
 router = APIRouter(tags=["web"])
 
@@ -91,49 +95,6 @@ class QueueFilters(TypedDict):
     website_id: UUID | None
     queued_only: bool
     search: str
-
-
-def _form_bool(value: object, *, default: bool) -> bool:
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "on", "yes"}:
-            return True
-        if normalized in {"false", "0", "off", "no", ""}:
-            return False
-    if isinstance(value, bool):
-        return value
-    return default
-
-
-def _form_int(value: object, *, default: int) -> int:
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return default
-    return default
-
-
-def _form_float(value: object, *, default: float) -> float:
-    if isinstance(value, (float, int)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return default
-    return default
-
-
-def _form_uuid(value: object) -> UUID | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    try:
-        return UUID(value)
-    except ValueError:
-        return None
 
 
 def _get_templates(request: Request) -> Jinja2Templates:
@@ -1669,13 +1630,6 @@ async def inspect_single_url(
     """Inspect a single URL via Google URL Inspection API, bypassing rate limits."""
     templates = _get_templates(request)
 
-    url_record = await session.get(URL, url_id)
-    if url_record is None or url_record.website_id != website_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="URL not found",
-        )
-
     website = await session.get(Website, website_id)
     if website is None:
         raise HTTPException(
@@ -1683,114 +1637,25 @@ async def inspect_single_url(
             detail="Website not found",
         )
 
-    service_account = await session.scalar(
-        select(ServiceAccount).where(ServiceAccount.website_id == website_id)
-    )
-    if service_account is None:
-        item = await _build_url_item(session, url_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/website_url_row.html",
-            context={
-                "website": website,
-                "item": item,
-                "error_message": "No service account configured",
-            },
-        )
-
-    try:
-        clients = WebsiteGoogleAPIClients(
-            config=WebsiteServiceAccountConfig(
-                credentials_path=service_account.credentials_path
-            )
-        )
-        result = await asyncio.to_thread(
-            clients.search_console.inspect_url_sync,
-            url_record.url,
-            website.site_url,
-        )
-    except Exception as error:
-        item = await _build_url_item(session, url_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/website_url_row.html",
-            context={
-                "website": website,
-                "item": item,
-                "error_message": f"Request failed: {error}",
-            },
-        )
-
-    if result.http_status == 429:
-        item = await _build_url_item(session, url_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/website_url_row.html",
-            context={
-                "website": website,
-                "item": item,
-                "error_message": "Rate limited by Google, please try again later",
-            },
-        )
-
-    if result.error_code == "AUTH_ERROR":
-        item = await _build_url_item(session, url_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/website_url_row.html",
-            context={
-                "website": website,
-                "item": item,
-                "error_message": "Authentication failed, check service account",
-            },
-        )
+    result = await inspect_single_url_service(session, website_id, url_id)
 
     if not result.success:
-        item = await _build_url_item(session, url_id)
         return templates.TemplateResponse(
             request=request,
             name="partials/website_url_row.html",
             context={
                 "website": website,
-                "item": item,
-                "error_message": result.error_message or "Inspection failed",
+                "item": result.item,
+                "error_message": result.error_message,
             },
         )
 
-    checked_at = datetime.now(UTC)
-    raw_response = result.raw_response or {}
-    index_status_result = _extract_index_status_result(raw_response)
-
-    index_status = IndexStatus(
-        url_id=url_id,
-        coverage_state=result.coverage_state or "INSPECTION_FAILED",
-        verdict=_index_verdict(result.verdict),
-        last_crawl_time=result.last_crawl_time,
-        indexed_at=result.last_crawl_time,
-        checked_at=checked_at,
-        robots_txt_state=result.robots_txt_state,
-        indexing_state=result.indexing_state,
-        page_fetch_state=_optional_text(index_status_result.get("pageFetchState")),
-        google_canonical=_optional_text(index_status_result.get("googleCanonical")),
-        user_canonical=_optional_text(index_status_result.get("userCanonical")),
-        raw_response=raw_response,
-    )
-    session.add(index_status)
-
-    derived_status = derive_url_index_status_from_coverage_state(
-        result.coverage_state or "INSPECTION_FAILED"
-    )
-    url_record.latest_index_status = derived_status
-    url_record.last_checked_at = checked_at
-    await session.flush()
-
-    item = await _build_url_item(session, url_id)
     return templates.TemplateResponse(
         request=request,
         name="partials/website_url_row.html",
         context={
             "website": website,
-            "item": item,
+            "item": result.item,
         },
     )
 
@@ -1808,13 +1673,6 @@ async def submit_single_url(
     """Submit a single URL via Google Indexing API, bypassing rate limits."""
     templates = _get_templates(request)
 
-    url_record = await session.get(URL, url_id)
-    if url_record is None or url_record.website_id != website_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="URL not found",
-        )
-
     website = await session.get(Website, website_id)
     if website is None:
         raise HTTPException(
@@ -1822,90 +1680,21 @@ async def submit_single_url(
             detail="Website not found",
         )
 
-    service_account = await session.scalar(
-        select(ServiceAccount).where(ServiceAccount.website_id == website_id)
-    )
-    if service_account is None:
-        item = await _build_url_item(session, url_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/website_url_row.html",
-            context={
-                "website": website,
-                "item": item,
-                "error_message": "No service account configured",
-            },
+    result = await submit_single_url_service(session, website_id, url_id)
+
+    if result.error_type == "not_found":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result.error_message,
         )
 
-    try:
-        clients = WebsiteGoogleAPIClients(
-            config=WebsiteServiceAccountConfig(
-                credentials_path=service_account.credentials_path
-            )
-        )
-        result = await asyncio.to_thread(
-            clients.indexing.submit_url_sync,
-            url_record.url,
-            "URL_UPDATED",
-        )
-    except Exception as error:
-        item = await _build_url_item(session, url_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/website_url_row.html",
-            context={
-                "website": website,
-                "item": item,
-                "error_message": f"Request failed: {error}",
-            },
-        )
-
-    if result.http_status == 429:
-        item = await _build_url_item(session, url_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/website_url_row.html",
-            context={
-                "website": website,
-                "item": item,
-                "error_message": "Rate limited by Google, please try again later",
-            },
-        )
-
-    if result.error_code == "AUTH_ERROR":
-        item = await _build_url_item(session, url_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/website_url_row.html",
-            context={
-                "website": website,
-                "item": item,
-                "error_message": "Authentication failed, check service account",
-            },
-        )
-
-    if not result.success:
-        item = await _build_url_item(session, url_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/website_url_row.html",
-            context={
-                "website": website,
-                "item": item,
-                "error_message": result.error_message or "Submission failed",
-            },
-        )
-
-    url_record.last_submitted_at = datetime.now(UTC)
-    await session.flush()
-
-    item = await _build_url_item(session, url_id)
     return templates.TemplateResponse(
         request=request,
         name="partials/website_url_row.html",
         context={
             "website": website,
-            "item": item,
+            "item": result.item,
+            "error_message": result.error_message if not result.success else None,
         },
     )
 
@@ -1975,39 +1764,3 @@ async def _build_url_item(
         "google_canonical": result.google_canonical,
         "user_canonical": result.user_canonical,
     }
-
-
-def _extract_index_status_result(raw_response: dict[str, Any]) -> dict[str, Any]:
-    """Extract indexStatusResult from raw API response."""
-    inspection_result = raw_response.get("inspectionResult")
-    if not isinstance(inspection_result, dict):
-        return {}
-    index_status_result = inspection_result.get("indexStatusResult")
-    if not isinstance(index_status_result, dict):
-        return {}
-    return index_status_result
-
-
-def _index_verdict(verdict: str | None) -> IndexVerdict:
-    """Convert verdict string to IndexVerdict enum."""
-    if verdict is None:
-        return IndexVerdict.NEUTRAL
-
-    normalized_verdict = verdict.strip().upper()
-    if normalized_verdict in {
-        IndexVerdict.PASS.value,
-        IndexVerdict.FAIL.value,
-        IndexVerdict.NEUTRAL.value,
-        IndexVerdict.PARTIAL.value,
-    }:
-        return IndexVerdict(normalized_verdict)
-
-    return IndexVerdict.NEUTRAL
-
-
-def _optional_text(value: Any) -> str | None:
-    """Extract optional text from response value."""
-    if isinstance(value, str):
-        stripped_value = value.strip()
-        return stripped_value if stripped_value != "" else None
-    return None

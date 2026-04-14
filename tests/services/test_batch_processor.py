@@ -298,7 +298,7 @@ async def test_batch_processor_skips_already_indexed_urls_without_manual_overrid
                     system_status=InspectionSystemStatus.INDEXED,
                     verdict="PASS",
                     coverage_state="Indexed",
-                    last_crawl_time=datetime(2026, 2, 20, 9, 0, tzinfo=UTC),
+                    last_crawl_time=datetime.now(UTC) - timedelta(days=30),
                     indexing_state="INDEXING_ALLOWED",
                     robots_txt_state="ALLOWED",
                     raw_response={
@@ -579,7 +579,7 @@ async def test_batch_processor_keeps_denormalized_status_on_transient_inspection
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 
-    original_checked_at = datetime(2026, 2, 10, 8, 0, tzinfo=UTC)
+    original_checked_at = datetime.now(UTC) - timedelta(days=35)
 
     async with scoped_session() as session:
         website = Website(

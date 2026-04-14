@@ -201,7 +201,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     for handled_signal in (signal.SIGTERM, signal.SIGINT):
         previous_handlers[handled_signal] = signal.getsignal(handled_signal)
 
-        def _signal_handler(signum: int, frame: object | None) -> None:
+        def _signal_handler(
+            signum: int, frame: object | None, _signal=handled_signal
+        ) -> None:
             _handle_shutdown_signal(app, signum)
             previous_handler = previous_handlers[signal.Signals(signum)]
             if callable(previous_handler):

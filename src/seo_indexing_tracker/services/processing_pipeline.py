@@ -20,7 +20,6 @@ from seo_indexing_tracker.database import session_scope
 from seo_indexing_tracker.models import (
     JobExecution,
     IndexStatus,
-    IndexVerdict,
     ServiceAccount,
     Sitemap,
     URL,
@@ -52,6 +51,7 @@ from seo_indexing_tracker.services.url_discovery import URLDiscoveryService
 from seo_indexing_tracker.utils.index_status import (
     derive_url_index_status_from_coverage_state,
 )
+from seo_indexing_tracker.utils.shared_helpers import parse_verdict
 
 _job_logger = logging.getLogger("seo_indexing_tracker.scheduler.jobs")
 
@@ -1102,9 +1102,7 @@ class SchedulerProcessingPipelineService:
         return {
             "url_id": url_id,
             "coverage_state": result.coverage_state or "INSPECTION_FAILED",
-            "verdict": SchedulerProcessingPipelineService._parse_verdict(
-                result.verdict
-            ),
+            "verdict": parse_verdict(result.verdict),
             "last_crawl_time": result.last_crawl_time,
             "indexed_at": result.last_crawl_time,
             "checked_at": datetime.now(UTC),
@@ -1119,22 +1117,6 @@ class SchedulerProcessingPipelineService:
                 "error_message": result.error_message,
             },
         }
-
-    @staticmethod
-    def _parse_verdict(verdict: str | None) -> IndexVerdict:
-        if verdict is None:
-            return IndexVerdict.NEUTRAL
-
-        normalized_verdict = verdict.strip().upper()
-        if normalized_verdict in {
-            IndexVerdict.PASS.value,
-            IndexVerdict.FAIL.value,
-            IndexVerdict.NEUTRAL.value,
-            IndexVerdict.PARTIAL.value,
-        }:
-            return IndexVerdict(normalized_verdict)
-
-        return IndexVerdict.NEUTRAL
 
     async def _list_active_sitemap_ids(self) -> list[UUID]:
         async with session_scope() as session:

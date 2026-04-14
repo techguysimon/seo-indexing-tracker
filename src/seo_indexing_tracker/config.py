@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,13 +38,6 @@ class Settings(BaseSettings):
     INSPECTION_DAILY_QUOTA_LIMIT: int = Field(default=2000, ge=0)
     QUOTA_RATE_LIMIT_COOLDOWN_SECONDS: int = Field(default=3600, ge=0)
     OUTBOUND_HTTP_USER_AGENT: str = "BlueBeastBuildAgent"
-
-    @field_validator("LOG_FILE", mode="before")
-    @classmethod
-    def parse_log_file(cls, value: object) -> object:
-        if value in (None, ""):
-            return None
-        return value
 
 
 @lru_cache(maxsize=1)
