@@ -1,8 +1,12 @@
 """Authentication API routes: login, OAuth callback, logout."""
 
+import logging
+
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+
+logger = logging.getLogger("seo_indexing_tracker.auth")
 
 from seo_indexing_tracker.schemas.auth import UserInfo
 from seo_indexing_tracker.services.auth_service import AuthService
@@ -85,7 +89,13 @@ async def auth_callback(request: Request) -> RedirectResponse:
         )
         return response
 
-    except Exception:
+    except Exception as e:
+        logger.error(
+            "OAuth callback error: %s (%s)",
+            e,
+            type(e).__name__,
+            exc_info=True,
+        )
         return RedirectResponse(
             url="/access-denied?reason=callback_error", status_code=302
         )

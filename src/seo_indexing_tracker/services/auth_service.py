@@ -91,7 +91,9 @@ class AuthService:
         redirect_uri = str(request.url_for("auth_callback"))
         token = await oauth.google.fetch_token(redirect_uri, code=code)
         resp = await oauth.google.get(_GOOGLE_USERINFO_ENDPOINT, token=token)
-        return resp.json()
+        data = resp.json()
+        logger.info("Google userinfo response: %s", data)
+        return data
 
     def create_jwt(self, email: str, role: str) -> str:
         """Create JWT with email + role, signed with JWT_SECRET."""
