@@ -67,12 +67,9 @@ class AuthService:
                 name="google",
                 client_id=self._google_client_id,
                 client_secret=self._google_client_secret,
-                server_metadata_url=None,
-                client_kwargs={
-                    "scope": "openid email profile",
-                    "endpoint": _GOOGLE_AUTH_ENDPOINT,
-                },
+                authorize_url=_GOOGLE_AUTH_ENDPOINT,
                 token_endpoint=_GOOGLE_TOKEN_ENDPOINT,
+                client_kwargs={"scope": "openid email profile"},
             )
             self._oauth_initialized = True
         return self._oauth_client
