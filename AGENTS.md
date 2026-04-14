@@ -134,6 +134,22 @@ uv run mypy src tests
 2. Register job in `SchedulerProcessingPipelineService.register_jobs()`
 3. Job automatically gets overlap protection and metrics tracking
 
+### UI Design System
+
+The UI follows the **IndexPulse** design system ("Slate Teal Precision"). All templates use Tailwind CSS (CDN), Manrope/Inter fonts, and Material Symbols Outlined icons.
+
+- **Design spec:** `docs/INDEXPULSE_DESIGN_SYSTEM.md` — colors, typography, component rules, "no-line" philosophy
+- **Tailwind config:** Defined inline in `base.html` with the full design system color palette
+- **Core layout:** Sidebar nav + glass header + mobile bottom bar (`base.html`)
+- **CSS:** Minimal overrides only in `static/css/app.css` (Tailwind handles everything else)
+
+When adding or modifying UI:
+1. Use the design system color tokens (`primary`, `surface-container-lowest`, `on-surface`, etc.) — not raw hex
+2. Use `font-headline` for headings, `font-body` for data, `font-label` for uppercase metadata
+3. Use Material Symbols (`<span class="material-symbols-outlined">icon_name</span>`) for icons
+4. No `1px solid` borders — use tonal background shifts (`surface-container-low` on `background`)
+5. Preserve all HTMX attributes (`hx-get`, `hx-post`, `hx-target`, `hx-swap`) and Jinja2 syntax
+
 ### Updating the UI Setup Flow
 
 The full setup flow is centered on the website detail page:
