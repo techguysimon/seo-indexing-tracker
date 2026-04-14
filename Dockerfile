@@ -33,6 +33,8 @@ RUN groupadd --system app \
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=app:app src ./src
 
+RUN mkdir -p /app/data /app/credentials /app/logs && chmod 777 /app/data /app/credentials /app/logs
+
 USER app
 
 EXPOSE 8000
