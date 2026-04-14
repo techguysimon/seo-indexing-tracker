@@ -21,6 +21,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 import uvicorn
 
 from seo_indexing_tracker.api.activity import router as activity_router
+from seo_indexing_tracker.api.auth import router as auth_router
 from seo_indexing_tracker.api.config_validation import (
     router as config_validation_router,
 )
@@ -41,6 +42,7 @@ from seo_indexing_tracker.database import (
     run_startup_database_health_check,
     session_scope,
 )
+from seo_indexing_tracker.middleware.auth import AuthMiddleware
 from seo_indexing_tracker.models import JobExecution, QuotaUsage, URL
 from seo_indexing_tracker.services.job_recovery_service import JobRecoveryService
 from seo_indexing_tracker.services.processing_pipeline import (
@@ -316,6 +318,7 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.templates = templates
     app.add_middleware(ProxyAwareSchemeMiddleware)
+    app.add_middleware(AuthMiddleware)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
     add_request_logging_middleware(app)
     app.mount(
@@ -323,6 +326,7 @@ def create_app() -> FastAPI:
         StaticFiles(directory=str(package_directory / "static")),
         name="static",
     )
+    app.include_router(auth_router)
     app.include_router(config_validation_router)
     app.include_router(web_router)
     app.include_router(queue_router)

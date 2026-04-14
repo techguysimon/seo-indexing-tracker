@@ -10,6 +10,7 @@
 
 <section class="panel">
   {% if feedback %}<p class="feedback">{{ feedback }}</p>{% endif %}
+  {% if current_user.role == 'admin' %}
   <form class="filter-grid" action="/ui/websites" method="post">
     <label>
       Domain
@@ -21,6 +22,9 @@
     </label>
     <button type="submit" class="panel-button">Add website</button>
   </form>
+  {% else %}
+  <p><a href="/login">Sign in with Google to add websites</a></p>
+  {% endif %}
 </section>
 
 <section class="panel">
@@ -33,6 +37,7 @@
       <span class="pill {% if website.is_active %}pill-ok{% else %}pill-dim{% endif %}">
         {% if website.is_active %}Active{% else %}Inactive{% endif %}
       </span>
+      {% if current_user.role == 'admin' %}
       <form
         class="inline-form"
         hx-delete="/api/websites/{{ website.id }}?hard_delete=true"
@@ -47,6 +52,7 @@
           Delete website
         </button>
       </form>
+      {% endif %}
     </li>
     {% else %}
     <li>No websites configured yet.</li>

@@ -17,6 +17,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seo_indexing_tracker.database import get_db_session
+from seo_indexing_tracker.api.auth import require_admin
+from seo_indexing_tracker.schemas.auth import UserInfo
 from seo_indexing_tracker.api.urls import (
     WebsiteURLListResponse,
     ensure_website_exists,
@@ -466,6 +468,7 @@ async def queue_table_partial(
 async def queue_priority_action(
     url_id: UUID,
     request: Request,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
     form_data = await request.form()
@@ -511,6 +514,7 @@ async def queue_priority_action(
 @router.post("/web/queue/batch", response_class=HTMLResponse)
 async def queue_batch_action(
     request: Request,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
     form_data = await request.form()
@@ -673,6 +677,7 @@ async def website_urls_page(
 )
 async def create_website_from_web(
     request: Request,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     templates = _get_templates(request)
@@ -709,6 +714,7 @@ async def create_website_from_web(
 async def create_service_account_from_web(
     request: Request,
     website_id: UUID,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     """Create service account for a website via web form."""
@@ -773,6 +779,7 @@ async def create_service_account_from_web(
 async def delete_service_account_from_web(
     request: Request,
     website_id: UUID,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     """Delete service account for a website via web UI."""
@@ -805,6 +812,7 @@ async def delete_service_account_from_web(
 async def create_sitemap_for_website_from_web(
     request: Request,
     website_id: UUID,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     """Create sitemap for a website from website detail page."""
@@ -860,6 +868,7 @@ async def create_sitemap_for_website_from_web(
 async def delete_sitemap_from_web(
     request: Request,
     sitemap_id: UUID,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     """Delete sitemap via website detail page."""
@@ -895,6 +904,7 @@ async def delete_sitemap_from_web(
 async def trigger_indexing(
     request: Request,
     website_id: UUID,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     """Trigger URL discovery and queueing for a website."""
@@ -1015,6 +1025,7 @@ async def trigger_indexing(
 async def discover_quota_from_web(
     request: Request,
     website_id: UUID,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     website = await session.get(Website, website_id)
@@ -1067,6 +1078,7 @@ async def quota_edit_form(
 async def set_quota_override(
     request: Request,
     website_id: UUID,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
     """Handle quota override form submission."""
@@ -1177,6 +1189,7 @@ async def sitemaps_management(
 )
 async def create_sitemap_from_web(
     request: Request,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     templates = _get_templates(request)
@@ -1244,6 +1257,7 @@ async def inspect_single_url(
     request: Request,
     website_id: UUID,
     url_id: UUID,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
     """Inspect a single URL via Google URL Inspection API, bypassing rate limits."""
@@ -1287,6 +1301,7 @@ async def submit_single_url(
     request: Request,
     website_id: UUID,
     url_id: UUID,
+    _: UserInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
     """Submit a single URL via Google Indexing API, bypassing rate limits."""

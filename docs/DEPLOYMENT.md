@@ -41,6 +41,14 @@ Configure these in CapRover's app configuration (Config -> Environment Variables
 | `INDEXING_DAILY_QUOTA_LIMIT` | `200` | Indexing API daily limit |
 | `INSPECTION_DAILY_QUOTA_LIMIT` | `2000` | Inspection API daily limit |
 | `OUTBOUND_HTTP_USER_AGENT` | `BlueBeastBuildAgent` | HTTP User-Agent |
+| `GOOGLE_CLIENT_ID` | `your-client-id.apps.googleusercontent.com` | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | `your-client-secret` | Google OAuth client secret |
+| `ADMIN_EMAILS` | `admin@example.com` | Comma-separated admin emails |
+| `GUEST_EMAILS` | `guest@example.com` | Comma-separated guest emails |
+| `JWT_SECRET_KEY` | `<generate-random>` | 256-bit secret for JWT signing |
+| `JWT_EXPIRY_HOURS` | `168` | JWT lifetime (168h = 7 days recommended for production) |
+
+For Google OAuth setup, see [AUTH_SETUP.md](./AUTH_SETUP.md).
 
 ## CapRover Setup Steps
 

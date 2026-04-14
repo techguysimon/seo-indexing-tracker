@@ -15,6 +15,7 @@
       <div class="bar-track quota-track" role="img" aria-label="Inspection quota usage progress">
         <div class="bar-fill quota-inspection" style="--bar: {{ "%.2f" | format(quota_status.inspection.percentage_used) }}%;"></div>
       </div>
+      {% if current_user and current_user.role == 'admin' %}
       <form
         class="inline-form"
         action="/ui/websites/{{ website.id }}/quota/discover"
@@ -25,10 +26,14 @@
       >
         <button type="submit" class="panel-button panel-button-small">Test quota</button>
       </form>
+      {% else %}
+      <span class="text-muted">Quota management requires admin access</span>
+      {% endif %}
       <span>Indexed URLs: {{ index_stats.indexed_count }}</span>
       <span>Not indexed URLs: {{ index_stats.not_indexed_count }}</span>
       <span>Coverage: {{ index_stats.coverage_percentage }}%</span>
       <div class="quota-override">
+        {% if current_user and current_user.role == 'admin' %}
         <button 
           class="btn btn-small" 
           hx-get="/ui/websites/{{ website.id }}/quota-edit"
@@ -37,6 +42,7 @@
         >
           Set Quota
         </button>
+        {% endif %}
         <div id="quota-edit-container"></div>
       </div>
       {% if website_eta %}
@@ -90,6 +96,7 @@
       <strong>{{ service_account.name }}</strong>
       <span>{{ service_account.credentials_path }}</span>
       <span>Scopes: {{ service_account.scopes | join(", ") }}</span>
+      {% if current_user and current_user.role == 'admin' %}
       <form
         class="inline-form"
         action="/ui/websites/{{ website.id }}/service-account/delete"
@@ -106,10 +113,14 @@
           Delete service account
         </button>
       </form>
+      {% else %}
+      <span class="text-muted">Service account management requires admin access</span>
+      {% endif %}
     </li>
   </ul>
   {% else %}
   <p>Not configured yet.</p>
+  {% if current_user and current_user.role == 'admin' %}
   <form
     class="filter-grid"
     action="/ui/websites/{{ website.id }}/service-account"
@@ -141,11 +152,15 @@
     </label>
     <button type="submit" class="panel-button">Save service account</button>
   </form>
+  {% else %}
+  <span class="text-muted">Service account management requires admin access</span>
+  {% endif %}
   {% endif %}
 </section>
 
 <section class="panel">
   <h2>Sitemaps</h2>
+  {% if current_user and current_user.role == 'admin' %}
   <form
     class="filter-grid"
     action="/ui/websites/{{ website.id }}/sitemaps"
@@ -168,6 +183,9 @@
     </label>
     <button type="submit" class="panel-button">Add sitemap</button>
   </form>
+  {% else %}
+  <span class="text-muted">Sitemap management requires admin access</span>
+  {% endif %}
 
   <ul class="data-list">
     {% for sitemap in sitemaps %}
@@ -199,6 +217,7 @@
       <span class="pill pill-dim">Not refreshed</span>
       {%- endif -%}
       
+      {% if current_user and current_user.role == 'admin' %}
       <form
         class="inline-form"
         action="/ui/sitemaps/{{ sitemap.id }}/delete"
@@ -215,6 +234,9 @@
           Delete sitemap
         </button>
       </form>
+      {% else %}
+      <span class="text-muted">Sitemap management requires admin access</span>
+      {% endif %}
     </li>
     {% else %}
     <li>No sitemaps configured yet.</li>
@@ -225,6 +247,7 @@
 <section class="panel">
   <h2>Trigger indexing</h2>
   <p>Run sitemap discovery and enqueue all discovered URLs for this website.</p>
+  {% if current_user and current_user.role == 'admin' %}
   <form
     action="/ui/websites/{{ website.id }}/trigger"
     method="post"
@@ -234,4 +257,7 @@
   >
     <button type="submit" class="panel-button">Trigger indexing</button>
   </form>
+  {% else %}
+  <span class="text-muted">Trigger indexing requires admin access</span>
+  {% endif %}
 </section>

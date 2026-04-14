@@ -24,6 +24,15 @@
           <a href="/ui/websites">Websites</a>
           <a href="/ui/sitemaps">Sitemaps</a>
           <a href="/health">Health</a>
+          {% if current_user %}
+            {% if current_user.role == 'admin' %}
+              <span style="font-size: 12px; background: #6366f1; color: white; padding: 2px 8px; border-radius: 4px;">Admin</span>
+            {% endif %}
+            <span style="font-size: 14px; opacity: 0.8;">{{ current_user.email }} ({{ current_user.role }})</span>
+            <a href="/logout">Logout</a>
+          {% else %}
+            <a href="/login">Login</a>
+          {% endif %}
         </nav>
       </header>
 
@@ -32,9 +41,9 @@
       <footer class="site-footer">
         <p>Environment: {{ settings.LOG_LEVEL }} mode</p>
         {% if current_user %}
-        <p>Signed in as {{ current_user }}</p>
+          <p>Signed in as {{ current_user.email }} · {{ current_user.role }}</p>
         {% else %}
-        <p>Guest mode</p>
+          <p><a href="/login">Sign in with Google</a></p>
         {% endif %}
       </footer>
     </div>

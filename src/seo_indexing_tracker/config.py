@@ -38,6 +38,26 @@ class Settings(BaseSettings):
     INSPECTION_DAILY_QUOTA_LIMIT: int = Field(default=2000, ge=0)
     QUOTA_RATE_LIMIT_COOLDOWN_SECONDS: int = Field(default=3600, ge=0)
     OUTBOUND_HTTP_USER_AGENT: str = "BlueBeastBuildAgent"
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: SecretStr = Field(default=SecretStr(""), exclude=True)
+    ADMIN_EMAILS: str = ""
+    GUEST_EMAILS: str = ""
+    JWT_SECRET_KEY: SecretStr = Field(default=SecretStr(""), exclude=True)
+    JWT_EXPIRY_HOURS: int = Field(default=24, ge=1)
+
+    @property
+    def admin_email_list(self) -> list[str]:
+        return [e.strip() for e in self.ADMIN_EMAILS.split(",") if e.strip()]
+
+    @property
+    def guest_email_list(self) -> list[str]:
+        return [e.strip() for e in self.GUEST_EMAILS.split(",") if e.strip()]
+
+    @property
+    def is_auth_configured(self) -> bool:
+        return bool(
+            self.GOOGLE_CLIENT_ID and self.GOOGLE_CLIENT_SECRET.get_secret_value()
+        )
 
 
 @lru_cache(maxsize=1)
