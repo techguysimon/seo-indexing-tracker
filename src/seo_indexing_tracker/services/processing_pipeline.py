@@ -414,7 +414,6 @@ class SchedulerProcessingPipelineService:
             inspection_rows: list[dict[str, object]] = []
             results_by_url_id: dict[UUID, IndexStatusResult] = {}
             saw_google_429 = False
-            saw_internal_rate_limit = False
             for candidate in candidate_urls:
                 result = await self._inspect_single_url(
                     website_id=website.id,
@@ -423,8 +422,6 @@ class SchedulerProcessingPipelineService:
                 )
                 if result.http_status == 429:
                     saw_google_429 = True
-                elif is_transient_quota_error_code(result.error_code):
-                    saw_internal_rate_limit = True
                 inspection_rows.append(
                     build_index_status_row(url_id=candidate.url_id, result=result)
                 )
@@ -447,10 +444,10 @@ class SchedulerProcessingPipelineService:
                     # This triggers the long cooldown for genuine quota exhaustion
                     if saw_google_429:
                         website_row.quota_last_429_at = checked_at
-                    # Set internal_rate_limit_at for our own rate limiter backpressure
-                    # This is for internal token bucket exhaustion, not Google rejecting
-                    if saw_internal_rate_limit:
-                        website_row.internal_rate_limit_at = checked_at
+                    # NOTE: Do NOT set internal_rate_limit_at here.
+                    # The verification job (Inspection API) and submission job
+                    # (Indexing API) have separate Google quotas. A rate limit
+                    # on inspection should not block submissions.
 
                 for url_id, result in results_by_url_id.items():
                     url = url_by_id.get(url_id)
