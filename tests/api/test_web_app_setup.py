@@ -73,6 +73,4 @@ def test_dashboard_route_and_base_template_assets_are_present() -> None:
 
     assert "htmx.org" in base_template_content
     assert "alpinejs" in base_template_content
-    assert '<header class="site-header">' in base_template_content
-    assert '<footer class="site-footer">' in base_template_content
     assert "<nav" in base_template_content

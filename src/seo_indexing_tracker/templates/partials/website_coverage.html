@@ -1,0 +1,13 @@
+{% for website in metrics.index_stats.per_website %}
+<div class="space-y-2">
+  <div class="flex justify-between text-xs font-medium">
+    <span class="text-on-surface">{{ website.domain }}</span>
+    <span class="text-primary">{{ website.coverage_percentage }}%</span>
+  </div>
+  <div class="h-2 w-full bg-surface-container rounded-full overflow-hidden">
+    <div class="h-full bg-primary w-[{{ website.coverage_percentage }}%] rounded-full"></div>
+  </div>
+</div>
+{% else %}
+<p class="text-xs text-slate-400">No websites available.</p>
+{% endfor %}

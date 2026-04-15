@@ -15,7 +15,12 @@
 </section>
 
 <!-- Second Row: Index Coverage -->
-<section id="index-coverage">
+<section
+  id="index-coverage"
+  hx-get="/web/partials/index-coverage"
+  hx-trigger="load, every 15s"
+  hx-swap="innerHTML"
+>
   {% include "partials/index_coverage.html" %}
 </section>
 
@@ -26,26 +31,13 @@
       <h3 class="font-headline text-lg font-bold text-on-surface">Queue Distribution</h3>
       <span class="font-label text-[10px] bg-surface-container text-on-surface-variant px-2 py-1 rounded font-bold">BY PRIORITY</span>
     </div>
-    <div class="flex items-end justify-between h-48 gap-4 px-2">
-      <div class="flex-1 bg-surface-container-low rounded-t-lg relative group h-[40%]">
-        <div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity rounded-t-lg"></div>
-        <span class="absolute -top-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-slate-500">2.1k</span>
-        <span class="absolute -bottom-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Low</span>
-      </div>
-      <div class="flex-1 bg-surface-container-low rounded-t-lg relative group h-[65%]">
-        <div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity rounded-t-lg"></div>
-        <span class="absolute -top-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-slate-500">5.8k</span>
-        <span class="absolute -bottom-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Med</span>
-      </div>
-      <div class="flex-1 bg-primary rounded-t-lg relative group h-[100%]">
-        <span class="absolute -top-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-primary">12.4k</span>
-        <span class="absolute -bottom-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-primary uppercase tracking-tighter">High</span>
-      </div>
-      <div class="flex-1 bg-surface-container-low rounded-t-lg relative group h-[20%]">
-        <div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity rounded-t-lg"></div>
-        <span class="absolute -top-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-slate-500">0.4k</span>
-        <span class="absolute -bottom-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Bulk</span>
-      </div>
+    <div
+      id="queue-distribution"
+      hx-get="/web/partials/queue-distribution"
+      hx-trigger="load, every 10s"
+      hx-swap="innerHTML"
+    >
+      {% include "partials/queue_distribution.html" %}
     </div>
   </div>
 
@@ -55,20 +47,14 @@
       <h3 class="font-headline text-lg font-bold text-on-surface">Website Coverage</h3>
       <button class="text-primary font-label text-[10px] font-bold uppercase tracking-widest hover:underline">View All Sites</button>
     </div>
-    <div class="space-y-6">
-      {% for website in metrics.index_stats.per_website %}
-      <div class="space-y-2">
-        <div class="flex justify-between text-xs font-medium">
-          <span class="text-on-surface">{{ website.domain }}</span>
-          <span class="text-primary">{{ website.coverage_percentage }}%</span>
-        </div>
-        <div class="h-2 w-full bg-surface-container rounded-full overflow-hidden">
-          <div class="h-full bg-primary w-[{{ website.coverage_percentage }}%] rounded-full"></div>
-        </div>
-      </div>
-      {% else %}
-      <p class="text-xs text-slate-400">No websites available.</p>
-      {% endfor %}
+    <div
+      id="website-coverage"
+      class="space-y-6"
+      hx-get="/web/partials/website-coverage"
+      hx-trigger="load, every 15s"
+      hx-swap="innerHTML"
+    >
+      {% include "partials/website_coverage.html" %}
     </div>
   </div>
 </section>

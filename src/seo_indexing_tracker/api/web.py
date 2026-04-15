@@ -83,8 +83,10 @@ from seo_indexing_tracker.services.queue_template_service import (
     _table_context,
 )
 from seo_indexing_tracker.services.dashboard_service import (
+    _build_coverage_context,
     _build_system_status_context,
     _fetch_dashboard_metrics,
+    _fetch_queue_distribution,
     _fetch_recent_activity,
 )
 
@@ -274,6 +276,7 @@ async def dashboard(
     metrics = await _fetch_dashboard_metrics(request=request, session=session)
     activities = await _fetch_recent_activity(session=session, limit=20)
     system_status = await _build_system_status_context(request=request, session=session)
+    distribution = await _fetch_queue_distribution(session=session)
     return templates.TemplateResponse(
         request=request,
         name="pages/dashboard.html",
@@ -281,6 +284,7 @@ async def dashboard(
             "page_title": "Dashboard",
             "metrics": metrics,
             "activities": activities,
+            "distribution": distribution,
             "running_jobs": system_status["running_jobs"],
             "last_completed_runs": system_status.get("last_completed_runs", {}),
             "next_scheduled_runs": system_status["next_scheduled_runs"],
@@ -406,6 +410,48 @@ async def queue_status_partial(
             "websites_eta": websites_eta,
             "quota_reset_at": quota_reset_at,
         },
+    )
+
+
+@router.get("/web/partials/queue-distribution", response_class=HTMLResponse)
+async def queue_distribution_partial(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    templates = _get_templates(request)
+    distribution = await _fetch_queue_distribution(session=session)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/queue_distribution.html",
+        context={"distribution": distribution},
+    )
+
+
+@router.get("/web/partials/index-coverage", response_class=HTMLResponse)
+async def index_coverage_partial(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    templates = _get_templates(request)
+    index_stats = await _build_coverage_context(session=session)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/index_coverage.html",
+        context={"metrics": {"index_stats": index_stats}},
+    )
+
+
+@router.get("/web/partials/website-coverage", response_class=HTMLResponse)
+async def website_coverage_partial(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    templates = _get_templates(request)
+    index_stats = await _build_coverage_context(session=session)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/website_coverage.html",
+        context={"metrics": {"index_stats": index_stats}},
     )
 
 

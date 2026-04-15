@@ -92,6 +92,48 @@ def _format_next_run_by_job(request: Request) -> dict[str, str]:
     }
 
 
+async def _fetch_queue_distribution(
+    *, session: AsyncSession,
+) -> dict[str, int]:
+    """Count queued URLs by priority bucket for the distribution chart.
+
+    Buckets:
+      high:   current_priority >= 0.7
+      medium: 0.4 <= current_priority < 0.7
+      low:    0.0 < current_priority < 0.4
+      bulk:   current_priority == 0 (not queued, but tracked)
+    """
+    high = int(
+        (await session.scalar(
+            select(func.count()).select_from(URL).where(URL.current_priority >= 0.7)
+        )) or 0
+    )
+    medium = int(
+        (await session.scalar(
+            select(func.count()).select_from(URL).where(
+                URL.current_priority >= 0.4,
+                URL.current_priority < 0.7,
+            )
+        )) or 0
+    )
+    low = int(
+        (await session.scalar(
+            select(func.count()).select_from(URL).where(
+                URL.current_priority > 0,
+                URL.current_priority < 0.4,
+            )
+        )) or 0
+    )
+    return {"high": high, "medium": medium, "low": low}
+
+
+async def _build_coverage_context(
+    *, session: AsyncSession,
+) -> dict[str, object]:
+    """Index coverage stats + per-website breakdown for the coverage widget."""
+    return await IndexStatsService.get_dashboard_index_stats(session=session)
+
+
 async def _fetch_dashboard_metrics(
     *,
     request: Request,

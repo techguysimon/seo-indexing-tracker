@@ -1,0 +1,26 @@
+{% set total = distribution.high + distribution.medium + distribution.low %}
+{% if total > 0 %}
+  {% set high_pct = ((distribution.high / total) * 100) | round(0) | int %}
+  {% set med_pct = ((distribution.medium / total) * 100) | round(0) | int %}
+  {% set low_pct = ((distribution.low / total) * 100) | round(0) | int %}
+{% else %}
+  {% set high_pct = 0 %}
+  {% set med_pct = 0 %}
+  {% set low_pct = 0 %}
+{% endif %}
+<div class="flex items-end justify-between h-48 gap-4 px-2">
+  <div class="flex-1 bg-surface-container-low rounded-t-lg relative group {% if total > 0 %}h-[{{ low_pct if low_pct > 0 else 2 }}%]{% else %}h-[2%]{% endif %}">
+    <div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity rounded-t-lg"></div>
+    <span class="absolute -top-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-slate-500">{{ distribution.low }}</span>
+    <span class="absolute -bottom-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Low</span>
+  </div>
+  <div class="flex-1 bg-surface-container-low rounded-t-lg relative group {% if total > 0 %}h-[{{ med_pct if med_pct > 0 else 2 }}%]{% else %}h-[2%]{% endif %}">
+    <div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity rounded-t-lg"></div>
+    <span class="absolute -top-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-slate-500">{{ distribution.medium }}</span>
+    <span class="absolute -bottom-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Med</span>
+  </div>
+  <div class="flex-1 bg-primary rounded-t-lg relative group {% if total > 0 %}h-[{{ high_pct if high_pct > 0 else 2 }}%]{% else %}h-[2%]{% endif %}">
+    <span class="absolute -top-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-primary">{{ distribution.high }}</span>
+    <span class="absolute -bottom-6 left-1/2 -translate-x-1/2 font-label text-[10px] font-bold text-primary uppercase tracking-tighter">High</span>
+  </div>
+</div>

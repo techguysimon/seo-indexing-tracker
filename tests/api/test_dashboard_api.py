@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import os
 from pathlib import Path
 
@@ -95,6 +95,39 @@ async def test_dashboard_partials_include_observability_data(tmp_path: Path) -> 
         )
     )
 
+    from zoneinfo import ZoneInfo
+
+    def _datetime_us(value: datetime | None) -> str:
+        if value is None:
+            return "Never"
+        eastern_tz = ZoneInfo("America/New_York")
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        value_eastern = value.astimezone(eastern_tz)
+        return value_eastern.strftime("%-m-%-d-%Y %-I:%M %p")
+
+    def _datetime_relative(value: datetime | None) -> str:
+        if value is None:
+            return "Never"
+
+        now = datetime.now(UTC)
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        delta = now - value
+        if delta < timedelta(minutes=1):
+            return "just now"
+        if delta < timedelta(hours=1):
+            minutes = int(delta.total_seconds() / 60)
+            return f"{minutes} min{'s' if minutes != 1 else ''} ago"
+        if delta < timedelta(days=1):
+            hours = int(delta.total_seconds() / 3600)
+            return f"{hours} hour{'s' if hours != 1 else ''} ago"
+        return value.strftime("%-m-%-d-%Y")
+
+    app.state.templates.env.filters["datetime_us"] = _datetime_us
+    app.state.templates.env.filters["datetime_relative"] = _datetime_relative
+    app.state.templates.env.filters["humanize_date"] = _datetime_relative
+
     async def override_get_db_session() -> AsyncIterator[AsyncSession]:
         session = session_factory()
         try:
@@ -112,19 +145,39 @@ async def test_dashboard_partials_include_observability_data(tmp_path: Path) -> 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         stats_response = await client.get("/web/partials/dashboard-stats")
         assert stats_response.status_code == 200
-        assert "Index coverage" in stats_response.text
-        assert "1 / 2" in stats_response.text
-        assert "50.0% indexed" in stats_response.text
+        assert "Submitted Today" in stats_response.text
+        assert "Verified Today" in stats_response.text
+        assert "Queued URLs" in stats_response.text
+        assert "Indexing Quota" in stats_response.text
 
         activity_response = await client.get("/web/partials/activity-feed")
         assert activity_response.status_code == 200
-        assert "Recent activity" in activity_response.text
+        assert "Activity Feed" in activity_response.text
         assert "Verification completed for indexed URL" in activity_response.text
 
         system_status_response = await client.get("/web/partials/system-status")
         assert system_status_response.status_code == 200
-        assert "Running jobs" in system_status_response.text
-        assert "URL Submission" in system_status_response.text
-        assert "Processed 42 URLs" in system_status_response.text
+        assert "System Status" in system_status_response.text
+        assert "Submission" in system_status_response.text
+        assert "42" in system_status_response.text  # URLs processed count
+
+        queue_status_response = await client.get("/web/partials/queue-status")
+        assert queue_status_response.status_code == 200
+        assert "Live Queue Status" in queue_status_response.text
+        assert "Queued Now" in queue_status_response.text
+
+        queue_dist_response = await client.get("/web/partials/queue-distribution")
+        assert queue_dist_response.status_code == 200
+        assert "Low" in queue_dist_response.text
+        assert "High" in queue_dist_response.text
+
+        index_coverage_response = await client.get("/web/partials/index-coverage")
+        assert index_coverage_response.status_code == 200
+        assert "Indexed" in index_coverage_response.text
+        assert "50.0%" in index_coverage_response.text
+
+        website_coverage_response = await client.get("/web/partials/website-coverage")
+        assert website_coverage_response.status_code == 200
+        assert "widgets.example" in website_coverage_response.text
 
     await engine.dispose()
