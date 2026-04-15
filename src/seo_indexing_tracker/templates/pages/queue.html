@@ -3,7 +3,7 @@
 {% block title %}{{ page_title }} | SEO Indexing Tracker{% endblock %}
 
 {% block content %}
-<section class="px-8 pt-8 pb-6">
+<section class="px-4 md:px-8 pt-4 md:pt-8 pb-6">
   <div class="flex items-center gap-4 mb-2">
     <h2 class="text-xl font-bold tracking-tight text-teal-700 font-headline">{{ page_title }}</h2>
   </div>
@@ -58,7 +58,7 @@
   </form>
 </section>
 
-<section id="queue-table-region" class="px-8 pb-32">
+<section id="queue-table-region" class="px-4 md:px-8 pb-32">
   {% include "partials/queue_table.html" %}
 </section>
 {% endblock %}

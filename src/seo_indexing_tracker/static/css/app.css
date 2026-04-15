@@ -6,6 +6,11 @@
   vertical-align: middle;
 }
 
+/* Global overflow protection */
+* {
+  min-width: 0;
+}
+
 /* Glass effect for headers */
 .glass {
   background: rgba(255, 255, 255, 0.8);

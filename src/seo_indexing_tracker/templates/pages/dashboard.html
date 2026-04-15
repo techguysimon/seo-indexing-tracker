@@ -20,8 +20,8 @@
 </section>
 
 <!-- Middle Section: Queue Distribution & Website Coverage -->
-<section class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-  <div class="bg-surface-container-lowest p-8 rounded-xl shadow-sm">
+<section class="grid grid-cols-1 lg:grid-cols-2 gap-8 min-w-0">
+  <div class="bg-surface-container-lowest p-4 md:p-8 rounded-xl shadow-sm overflow-hidden">
     <div class="flex justify-between items-center mb-10">
       <h3 class="font-headline text-lg font-bold text-on-surface">Queue Distribution</h3>
       <span class="font-label text-[10px] bg-surface-container text-on-surface-variant px-2 py-1 rounded font-bold">BY PRIORITY</span>
@@ -50,7 +50,7 @@
   </div>
 
   <!-- Coverage by Website -->
-  <div class="bg-surface-container-lowest p-8 rounded-xl shadow-sm">
+  <div class="bg-surface-container-lowest p-4 md:p-8 rounded-xl shadow-sm overflow-hidden">
     <div class="flex justify-between items-center mb-8">
       <h3 class="font-headline text-lg font-bold text-on-surface">Website Coverage</h3>
       <button class="text-primary font-label text-[10px] font-bold uppercase tracking-widest hover:underline">View All Sites</button>
@@ -74,9 +74,9 @@
 </section>
 
 <!-- Bottom Section: Grid Layout with Sidebar -->
-<section class="grid grid-cols-1 lg:grid-cols-12 gap-8 pb-12">
+<section class="grid grid-cols-1 lg:grid-cols-12 gap-8 pb-20 md:pb-12 min-w-0">
   <!-- Left & Center: System Status & Activity -->
-  <div class="lg:col-span-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+  <div class="lg:col-span-8 min-w-0 grid grid-cols-1 md:grid-cols-2 gap-8">
     <div id="system-status-container">
       {% include "partials/system_status.html" with context %}
     </div>
@@ -94,7 +94,7 @@
   <!-- Right Column: Live Queue Status -->
   <div
     id="queue-status"
-    class="lg:col-span-4"
+    class="lg:col-span-4 min-w-0"
     hx-get="/web/partials/queue-status"
     hx-trigger="load, every 4s"
     hx-swap="innerHTML"

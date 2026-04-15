@@ -32,7 +32,7 @@
 <!-- Quota Cards -->
 <section class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
   <!-- Indexing API Card -->
-  <div class="bg-surface-container-lowest p-8 rounded-xl relative overflow-hidden group">
+  <div class="bg-surface-container-lowest p-4 md:p-8 rounded-xl relative overflow-hidden group">
     <div class="flex justify-between items-start mb-6">
       <div>
         <span class="font-label text-xs text-outline uppercase tracking-widest block mb-1">Quota Pool</span>
@@ -67,7 +67,7 @@
   </div>
 
   <!-- Inspection API Card -->
-  <div class="bg-surface-container-lowest p-8 rounded-xl relative overflow-hidden group">
+  <div class="bg-surface-container-lowest p-4 md:p-8 rounded-xl relative overflow-hidden group">
     <div class="flex justify-between items-start mb-6">
       <div>
         <span class="font-label text-xs text-outline uppercase tracking-widest block mb-1">Quota Pool</span>
@@ -105,14 +105,14 @@
 <!-- Tabbed Content Section -->
 <section class="bg-surface-container-lowest rounded-xl overflow-hidden" x-data="{active:'sitemaps'}">
   <!-- Tabs Header -->
-  <div class="flex px-8 border-b border-outline-variant/15">
+  <div class="flex px-4 md:px-8 border-b border-outline-variant/15">
     <button @click="active='sitemaps'" :class="active==='sitemaps' ? 'border-b-2 border-primary text-primary font-bold' : 'text-slate-500 hover:text-primary'" class="px-6 py-5 transition-colors text-sm font-headline">Sitemaps</button>
     <button @click="active='queue'" :class="active==='queue' ? 'border-b-2 border-primary text-primary font-bold' : 'text-slate-500 hover:text-primary'" class="px-6 py-5 transition-colors text-sm font-headline">Queue ETA</button>
     <button @click="active='config'" :class="active==='config' ? 'border-b-2 border-primary text-primary font-bold' : 'text-slate-500 hover:text-primary'" class="px-6 py-5 transition-colors text-sm font-headline">Configuration</button>
   </div>
 
   <!-- Sitemaps Tab -->
-  <div x-show="active==='sitemaps'" class="p-8">
+  <div x-show="active==='sitemaps'" class="p-4 md:p-8">
     {% if current_user and current_user.role == 'admin' %}
     <form
       class="flex gap-4 mb-8 p-6 bg-surface-container-low rounded-lg items-end"
@@ -197,7 +197,7 @@
   </div>
 
   <!-- Queue ETA Tab -->
-  <div x-show="active==='queue'" x-cloak class="p-8">
+  <div x-show="active==='queue'" x-cloak class="p-4 md:p-8">
     {% if website_eta %}
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
       <!-- Submission Queue -->
@@ -291,7 +291,7 @@
   </div>
 
   <!-- Configuration Tab -->
-  <div x-show="active==='config'" x-cloak class="p-8">
+  <div x-show="active==='config'" x-cloak class="p-4 md:p-8">
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-12">
       <!-- Service Account Section -->
       <div class="lg:col-span-2 space-y-8">

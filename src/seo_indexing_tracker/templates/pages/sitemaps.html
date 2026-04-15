@@ -28,7 +28,7 @@
 
 <!-- Add Sitemap Form -->
 {% if current_user %}
-<div class="bg-surface-container-lowest rounded-xl p-8 mb-8 border border-outline-variant/10">
+<div class="bg-surface-container-lowest rounded-xl p-4 md:p-8 mb-8 border border-outline-variant/10">
   <form action="/ui/sitemaps" method="post" class="flex flex-col md:flex-row gap-4 items-end">
     <div class="flex-1">
       <label class="block text-xs font-bold font-label uppercase tracking-widest text-slate-400 mb-2">Website</label>
@@ -59,7 +59,7 @@
   </form>
 </div>
 {% else %}
-<div class="bg-surface-container-lowest rounded-xl p-8 mb-8 border border-outline-variant/10">
+<div class="bg-surface-container-lowest rounded-xl p-4 md:p-8 mb-8 border border-outline-variant/10">
   <p class="text-sm text-on-surface-variant font-medium">Sign in with Google to add sitemaps.</p>
 </div>
 {% endif %}
